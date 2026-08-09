@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CineBook</string>
+    <string name="title_activity_main">CineBook</string>
+    <string name="package_name">com.cinebook.app</string>
+    <string name="custom_url_scheme">com.cinebook.app</string>
+</resources>

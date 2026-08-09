@@ -1,0 +1,114 @@
+/* ════════════════════════════════════════════════════════
+   DHRUB CINEPLEX — PREMIUM DESIGN SYSTEM
+   Luxury Cinema Token Architecture
+   ════════════════════════════════════════════════════════ */
+
+:root {
+
+  /* ── COLOUR PALETTE ─────────────────────────────────── */
+  /* Backgrounds: deep matte obsidian & warm slate */
+  --bg-void:       #060608;
+  --bg-primary:    #0B0B0E;
+  --bg-secondary:  #121217;
+  --bg-elevated:   #181820;
+  --bg-card:       #131318;
+  --bg-card-hover: #1C1C24;
+  --bg-surface:    rgba(255,255,255,0.02);
+  --bg-glass:      rgba(255,255,255,0.04);
+  --bg-tertiary:   #1E1E26;
+
+  /* Champagne Gold Hierarchy — luxurious & satin metallic */
+  --gold-100: #FAF6EE;
+  --gold-200: #F3EAD3;
+  --gold-400: #E4C389;
+  --gold-500: #C5A880;   /* Primary brand champagne gold */
+  --gold-600: #A38760;
+  --gold-glow: rgba(197,168,128,0.15);
+  --gold-glow-strong: rgba(197,168,128,0.30);
+
+  /* Legacy aliases */
+  --highlight-gold:       var(--gold-500);
+  --highlight-gold-hover: var(--gold-400);
+  --highlight-gold-glow:  var(--gold-glow);
+
+  /* Velvet Crimson (Burgundy) accent (CTAs, warnings) */
+  --crimson:       #962828;
+  --crimson-hover: #B23B3B;
+  --crimson-glow:  rgba(150,40,40,0.20);
+  --accent-crimson:       var(--crimson);
+  --accent-crimson-hover: var(--crimson-hover);
+  --accent-crimson-glow:  var(--crimson-glow);
+
+  /* Text hierarchy (Zinc/Neutral warm tones) */
+  --text-primary:   #F3F3F5;
+  --text-secondary: #A1A1AA;
+  --text-muted:     #71717A;
+  --text-disabled:  #3F3F46;
+
+  /* Borders */
+  --border-subtle:  rgba(255,255,255,0.04);
+  --border-default: rgba(255,255,255,0.07);
+  --border-strong:  rgba(255,255,255,0.12);
+  --border-gold:    rgba(197,168,128,0.20);
+
+  /* Seat Status */
+  --seat-available:        #15151C;
+  --seat-available-border: #2A2A35;
+  --seat-locked:           #5C3317;
+  --seat-locked-border:    #8C5023;
+  --seat-booked:           #241214;
+  --seat-booked-border:    #381A1D;
+  --seat-selected:         var(--gold-500);
+  --seat-selected-border:  var(--gold-400);
+
+  --category-normal:   #A1A1AA;
+  --category-premium:  #60A5FA;
+  --category-recliner: var(--gold-500);
+
+  /* ── TYPOGRAPHY ─────────────────────────────────────── */
+  --font-display: 'Playfair Display', 'Georgia', serif;
+  --font-heading: 'Outfit', 'Inter', sans-serif;
+  --font-body:    'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Legacy aliases */
+  --font-family-body:    var(--font-body);
+  --font-family-heading: var(--font-heading);
+
+  /* ── SPACING & LAYOUT ───────────────────────────────── */
+  --max-width:    1360px;
+  --header-height: 72px;
+
+  --radius-xs:   4px;
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   20px;
+  --radius-xl:   28px;
+  --radius-full: 9999px;
+
+  /* Legacy */
+  --border-radius-sm:   var(--radius-xs);
+  --border-radius-md:   var(--radius-sm);
+  --border-radius-lg:   var(--radius-lg);
+  --border-radius-full: var(--radius-full);
+
+  /* ── SHADOWS & GLOWS ────────────────────────────────── */
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.5);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.6);
+  --shadow-lg:  0 12px 40px rgba(0,0,0,0.7);
+  --shadow-xl:  0 25px 60px rgba(0,0,0,0.85);
+  --glow-gold:   0 0 20px var(--gold-glow), 0 0 50px rgba(197,168,128,0.08);
+  --glow-crimson: 0 0 20px var(--crimson-glow);
+
+  /* ── TRANSITIONS ────────────────────────────────────── */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-in-out-circ: cubic-bezier(0.85, 0, 0.15, 1);
+  --t-fast:   0.15s var(--ease-out-quart);
+  --t-normal: 0.28s var(--ease-out-quart);
+  --t-slow:   0.45s var(--ease-out-quart);
+
+  /* Legacy */
+  --transition-fast:   var(--t-fast);
+  --transition-normal: var(--t-normal);
+  --transition-slow:   var(--t-slow);
+}
