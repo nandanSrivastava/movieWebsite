@@ -8,79 +8,96 @@ import { useToast } from '@/features/shared/context/ToastContext';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
 import { isMockMode } from '@/lib/config';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useAdminStore } from '@/features/admin/store/adminStore';
-
-const getAuthHeaders = async (customHeaders: Record<string, string> = {}) => {
-  const headers: Record<string, string> = { ...customHeaders };
-  if (!isMockMode) {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token) {
-      headers['Authorization'] = `Bearer ${session.access_token}`;
-    }
-  }
-  return headers;
-};
-
-const fetchDashboardData = async () => {
-  const authHdrs = await getAuthHeaders();
-
-  const [locksRes, logsRes, showsRes, moviesRes, screensRes] = await Promise.all([
-    fetch('/api/admin/active-locks', { headers: authHdrs }),
-    fetch('/api/admin/audit-logs', { headers: authHdrs }),
-    fetch('/api/shows'),
-    fetch('/api/admin/movies', { headers: authHdrs }),
-    fetch('/api/screens')
-  ]);
-
-  const [locksData, logsData, showsData, moviesData, screensData] = await Promise.all([
-    locksRes.json().catch(() => ({})),
-    logsRes.json().catch(() => ({})),
-    showsRes.json().catch(() => ({})),
-    moviesRes.ok ? moviesRes.json().catch(() => ({})) : { movies: [] },
-    screensRes.ok ? screensRes.json().catch(() => ({})) : { screens: [] }
-  ]);
-
-  return {
-    activeLocks: locksData.activeLocks || [],
-    auditLogs: logsData.logs || [],
-    shows: showsData.shows || [],
-    moviesList: moviesData.movies || [],
-    screensList: screensData.screens || []
-  };
-};
 
 export default function AdminDashboardPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useCineBookAuth();
   const { showToast } = useToast();
-  const queryClient = useQueryClient();
 
+  const [activeLocks, setActiveLocks] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [shows, setShows] = useState<any[]>([]);
+  const [moviesList, setMoviesList] = useState<any[]>([]);
+  const [screensList, setScreensList] = useState<any[]>([]);
+  
+  const [loading, setLoading] = useState(true);
   const [actioning, setActioning] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
 
-  // Zustand Store States
-  const {
-    movieTitle, movieSynopsis, movieGenre, movieLanguage, movieDuration, movieCertification, moviePoster, movieTrailer, movieIsFeatured, movieSubmitting,
-    setMovieField, resetMovieForm, setMovieSubmitting,
-    scheduleMovieId, scheduleScreenId, scheduleDate, scheduleTime, priceNormal, pricePremium, priceRecliner, scheduleSubmitting,
-    setScheduleField, resetScheduleForm, setScheduleSubmitting
-  } = useAdminStore();
+  // Movie Form State
+  const [movieTitle, setMovieTitle] = useState('');
+  const [movieSynopsis, setMovieSynopsis] = useState('');
+  const [movieGenre, setMovieGenre] = useState('');
+  const [movieLanguage, setMovieLanguage] = useState('Hindi');
+  const [movieDuration, setMovieDuration] = useState('120');
+  const [movieCertification, setMovieCertification] = useState('UA');
+  const [moviePoster, setMoviePoster] = useState('');
+  const [movieTrailer, setMovieTrailer] = useState('');
+  const [movieIsFeatured, setMovieIsFeatured] = useState(false);
+  const [movieSubmitting, setMovieSubmitting] = useState(false);
 
-  // React Query for dashboard data
-  const { data, isLoading: loading, error } = useQuery({
-    queryKey: ['adminDashboard'],
-    queryFn: fetchDashboardData,
-    enabled: !!user && user.role === 'admin',
-    refetchInterval: 6000,
-    staleTime: 5000,
-  });
+  // Showtime Form State
+  const [scheduleMovieId, setScheduleMovieId] = useState('');
+  const [scheduleScreenId, setScheduleScreenId] = useState('');
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('');
+  const [priceNormal, setPriceNormal] = useState('180');
+  const [pricePremium, setPricePremium] = useState('250');
+  const [priceRecliner, setPriceRecliner] = useState('400');
+  const [scheduleSubmitting, setScheduleSubmitting] = useState(false);
 
-  const activeLocks = data?.activeLocks || [];
-  const auditLogs = data?.auditLogs || [];
-  const shows = data?.shows || [];
-  const moviesList = data?.moviesList || [];
-  const screensList = data?.screensList || [];
+  const getAuthHeaders = async (customHeaders: Record<string, string> = {}) => {
+    const headers: Record<string, string> = { ...customHeaders };
+    if (!isMockMode) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+    }
+    return headers;
+  };
+
+  const loadDashboardData = async () => {
+    try {
+      const authHdrs = await getAuthHeaders();
+
+      const [locksRes, logsRes, showsRes, moviesRes, screensRes] = await Promise.all([
+        fetch('/api/admin/active-locks', { headers: authHdrs }),
+        fetch('/api/admin/audit-logs', { headers: authHdrs }),
+        fetch('/api/shows'),
+        fetch('/api/admin/movies', { headers: authHdrs }),
+        fetch('/api/screens')
+      ]);
+
+      // 1. Fetch active seat locks
+      const locksData = await locksRes.json();
+      setActiveLocks(locksData.activeLocks || []);
+
+      // 2. Fetch audit logs
+      const logsData = await logsRes.json();
+      setAuditLogs(logsData.logs || []);
+
+      // 3. Fetch shows
+      const showsData = await showsRes.json();
+      setShows(showsData.shows || []);
+
+      // 4. Fetch movies list for scheduling
+      if (moviesRes.ok) {
+        const moviesData = await moviesRes.json();
+        setMoviesList(moviesData.movies || []);
+      }
+
+      // 5. Fetch screens list
+      if (screensRes.ok) {
+        const screensData = await screensRes.json();
+        setScreensList(screensData.screens || []);
+      }
+    } catch (err) {
+      console.error('Failed to load admin telemetry:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // Handle Create Movie Submission
   const handleCreateMovie = async (e: React.FormEvent) => {
@@ -106,12 +123,21 @@ export default function AdminDashboardPage() {
           is_featured: movieIsFeatured
         })
       });
-      const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error || 'Failed to list movie.');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to list movie.');
 
       showToast(`Successfully listed movie: "${movieTitle}"`, 'success');
-      resetMovieForm();
-      queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
+      setMovieTitle('');
+      setMovieSynopsis('');
+      setMovieGenre('');
+      setMovieLanguage('Hindi');
+      setMovieDuration('120');
+      setMovieCertification('UA');
+      setMoviePoster('');
+      setMovieTrailer('');
+      setMovieIsFeatured(false);
+
+      loadDashboardData();
     } catch (err: any) {
       showToast(err.message || 'Failed to list movie.', 'error');
     } finally {
@@ -141,12 +167,16 @@ export default function AdminDashboardPage() {
           price_recliner: priceRecliner
         })
       });
-      const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error || 'Failed to schedule showtime.');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to schedule showtime.');
 
       showToast('Successfully scheduled showtime!', 'success');
-      resetScheduleForm();
-      queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
+      setScheduleMovieId('');
+      setScheduleScreenId('');
+      setScheduleDate('');
+      setScheduleTime('');
+
+      loadDashboardData();
     } catch (err: any) {
       showToast(err.message || 'Failed to schedule showtime.', 'error');
     } finally {
@@ -155,13 +185,24 @@ export default function AdminDashboardPage() {
   };
 
   // Wait for auth to finish loading, mark as initialized, THEN redirect if not admin.
+  // Without the 'initialized' guard the redirect fires before onAuthStateChange
+  // restores the session (~200ms delay), bouncing valid admins back to /login.
   useEffect(() => {
-    if (authLoading) return;
-    setInitialized(true);
+    if (authLoading) return;          // still resolving session
+    setInitialized(true);             // auth has settled
     if (!user || user.role !== 'admin') {
       router.replace('/login?error=unauthorized');
     }
   }, [user, authLoading, router]);
+
+  useEffect(() => {
+    if (user && user.role === 'admin') {
+      loadDashboardData();
+      // Poll telemetry data every 6 seconds to show active locks expiring in real time
+      const interval = setInterval(loadDashboardData, 6000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
 
   // Handle Manual Seat Unlock Override
   const handleForceReleaseHold = async (showId: string, seatLayoutId: string, seatLabel: string) => {
@@ -184,7 +225,7 @@ export default function AdminDashboardPage() {
       }
 
       showToast(`Seat hold ${seatLabel} successfully released.`, 'success');
-      queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
+      loadDashboardData();
     } catch (err: any) {
       console.error(err);
       showToast(err.message || 'Error releasing lock.', 'error');
@@ -208,13 +249,13 @@ export default function AdminDashboardPage() {
 
   // Calculations
   const totalPaidRevenue = auditLogs
-    .filter((log: any) => log.action === 'PAYMENT_CAPTURE_SUCCESS' || log.action === 'BOOKING_CONFIRM_CASH_POS')
-    .reduce((acc: number, log: any) => {
+    .filter(log => log.action === 'PAYMENT_CAPTURE_SUCCESS' || log.action === 'BOOKING_CONFIRM_CASH_POS')
+    .reduce((acc, log) => {
       const amt = log.details?.amount || log.details?.totalAmount || 0;
       return acc + Number(amt);
     }, 0);
 
-  const totalTicketsSold = shows.reduce((acc: number, show: any) => acc + (show.bookedSeats || 0), 0);
+  const totalTicketsSold = shows.reduce((acc, show) => acc + (show.bookedSeats || 0), 0);
 
   if (!initialized || loading || authLoading || !user || user.role !== 'admin') {
     return (
@@ -283,7 +324,7 @@ export default function AdminDashboardPage() {
                     required
                     placeholder="e.g. Gladiator II"
                     value={movieTitle}
-                    onChange={(e) => setMovieField('movieTitle', e.target.value)}
+                    onChange={(e) => setMovieTitle(e.target.value)}
                     style={{
                       background: 'rgba(255,255,255,0.02)',
                       border: '1px solid rgba(255,255,255,0.08)',
@@ -305,7 +346,7 @@ export default function AdminDashboardPage() {
                     rows={2}
                     placeholder="Brief description of the movie..."
                     value={movieSynopsis}
-                    onChange={(e) => setMovieField('movieSynopsis', e.target.value)}
+                    onChange={(e) => setMovieSynopsis(e.target.value)}
                     style={{
                       background: 'rgba(255,255,255,0.02)',
                       border: '1px solid rgba(255,255,255,0.08)',
@@ -329,7 +370,7 @@ export default function AdminDashboardPage() {
                       type="text"
                       placeholder="Action, Sci-Fi"
                       value={movieGenre}
-                      onChange={(e) => setMovieField('movieGenre', e.target.value)}
+                      onChange={(e) => setMovieGenre(e.target.value)}
                       style={{
                         background: 'rgba(255,255,255,0.02)',
                         border: '1px solid rgba(255,255,255,0.08)',
@@ -347,7 +388,7 @@ export default function AdminDashboardPage() {
                       type="text"
                       placeholder="Hindi"
                       value={movieLanguage}
-                      onChange={(e) => setMovieField('movieLanguage', e.target.value)}
+                      onChange={(e) => setMovieLanguage(e.target.value)}
                       style={{
                         background: 'rgba(255,255,255,0.02)',
                         border: '1px solid rgba(255,255,255,0.08)',
@@ -368,7 +409,7 @@ export default function AdminDashboardPage() {
                       type="number"
                       placeholder="120"
                       value={movieDuration}
-                      onChange={(e) => setMovieField('movieDuration', e.target.value)}
+                      onChange={(e) => setMovieDuration(e.target.value)}
                       style={{
                         background: 'rgba(255,255,255,0.02)',
                         border: '1px solid rgba(255,255,255,0.08)',
@@ -384,7 +425,7 @@ export default function AdminDashboardPage() {
                     <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Certification</label>
                     <select
                       value={movieCertification}
-                      onChange={(e) => setMovieField('movieCertification', e.target.value)}
+                      onChange={(e) => setMovieCertification(e.target.value)}
                       style={{
                         background: '#1F1F27',
                         border: '1px solid rgba(255,255,255,0.08)',
@@ -408,7 +449,7 @@ export default function AdminDashboardPage() {
                     type="url"
                     placeholder="https://images.unsplash.com/photo-..."
                     value={moviePoster}
-                    onChange={(e) => setMovieField('moviePoster', e.target.value)}
+                    onChange={(e) => setMoviePoster(e.target.value)}
                     style={{
                       background: 'rgba(255,255,255,0.02)',
                       border: '1px solid rgba(255,255,255,0.08)',
@@ -427,7 +468,7 @@ export default function AdminDashboardPage() {
                     type="url"
                     placeholder="https://www.youtube.com/embed/..."
                     value={movieTrailer}
-                    onChange={(e) => setMovieField('movieTrailer', e.target.value)}
+                    onChange={(e) => setMovieTrailer(e.target.value)}
                     style={{
                       background: 'rgba(255,255,255,0.02)',
                       border: '1px solid rgba(255,255,255,0.08)',
@@ -445,7 +486,7 @@ export default function AdminDashboardPage() {
                     type="checkbox"
                     id="isFeaturedMovie"
                     checked={movieIsFeatured}
-                    onChange={(e) => setMovieField('movieIsFeatured', e.target.checked)}
+                    onChange={(e) => setMovieIsFeatured(e.target.checked)}
                     style={{
                       width: '18px',
                       height: '18px',
@@ -493,7 +534,7 @@ export default function AdminDashboardPage() {
                   <select
                     required
                     value={scheduleMovieId}
-                    onChange={(e) => setScheduleField('scheduleMovieId', e.target.value)}
+                    onChange={(e) => setScheduleMovieId(e.target.value)}
                     style={{
                       background: '#1F1F27',
                       border: '1px solid rgba(255,255,255,0.08)',
@@ -505,7 +546,7 @@ export default function AdminDashboardPage() {
                     }}
                   >
                     <option value="">-- Choose Movie --</option>
-                    {moviesList.map((movie: any) => (
+                    {moviesList.map(movie => (
                       <option key={movie.id} value={movie.id}>{movie.title}</option>
                     ))}
                   </select>
@@ -516,7 +557,7 @@ export default function AdminDashboardPage() {
                   <select
                     required
                     value={scheduleScreenId}
-                    onChange={(e) => setScheduleField('scheduleScreenId', e.target.value)}
+                    onChange={(e) => setScheduleScreenId(e.target.value)}
                     style={{
                       background: '#1F1F27',
                       border: '1px solid rgba(255,255,255,0.08)',
@@ -528,7 +569,7 @@ export default function AdminDashboardPage() {
                     }}
                   >
                     <option value="">-- Choose Screen --</option>
-                    {screensList.map((screen: any) => (
+                    {screensList.map(screen => (
                       <option key={screen.id} value={screen.id}>{screen.name}</option>
                     ))}
                   </select>
@@ -541,7 +582,7 @@ export default function AdminDashboardPage() {
                       type="date"
                       required
                       value={scheduleDate}
-                      onChange={(e) => setScheduleField('scheduleDate', e.target.value)}
+                      onChange={(e) => setScheduleDate(e.target.value)}
                       style={{
                         background: 'rgba(255,255,255,0.02)',
                         border: '1px solid rgba(255,255,255,0.08)',
@@ -559,7 +600,7 @@ export default function AdminDashboardPage() {
                       type="time"
                       required
                       value={scheduleTime}
-                      onChange={(e) => setScheduleField('scheduleTime', e.target.value)}
+                      onChange={(e) => setScheduleTime(e.target.value)}
                       style={{
                         background: 'rgba(255,255,255,0.02)',
                         border: '1px solid rgba(255,255,255,0.08)',
@@ -584,7 +625,7 @@ export default function AdminDashboardPage() {
                       type="number"
                       required
                       value={priceNormal}
-                      onChange={(e) => setScheduleField('priceNormal', e.target.value)}
+                      onChange={(e) => setPriceNormal(e.target.value)}
                       style={{
                         background: 'rgba(255,255,255,0.02)',
                         border: '1px solid rgba(255,255,255,0.08)',
@@ -602,7 +643,7 @@ export default function AdminDashboardPage() {
                       type="number"
                       required
                       value={pricePremium}
-                      onChange={(e) => setScheduleField('pricePremium', e.target.value)}
+                      onChange={(e) => setPricePremium(e.target.value)}
                       style={{
                         background: 'rgba(255,255,255,0.02)',
                         border: '1px solid rgba(255,255,255,0.08)',
@@ -620,7 +661,7 @@ export default function AdminDashboardPage() {
                       type="number"
                       required
                       value={priceRecliner}
-                      onChange={(e) => setScheduleField('priceRecliner', e.target.value)}
+                      onChange={(e) => setPriceRecliner(e.target.value)}
                       style={{
                         background: 'rgba(255,255,255,0.02)',
                         border: '1px solid rgba(255,255,255,0.08)',
@@ -686,7 +727,7 @@ export default function AdminDashboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {activeLocks.map((lock: any) => {
+                      {activeLocks.map((lock) => {
                         const timeLeft = Math.max(0, Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000));
                         const mins = Math.floor(timeLeft / 60);
                         const secs = timeLeft % 60;
@@ -727,7 +768,7 @@ export default function AdminDashboardPage() {
               </h3>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-                {shows.map((show: any) => (
+                {shows.map((show) => (
                   <div 
                     key={show.id}
                     style={{
@@ -779,7 +820,7 @@ export default function AdminDashboardPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {auditLogs.slice(0, 50).map((log: any, index: number) => (
+                    {auditLogs.slice(0, 50).map((log, index) => (
                       <tr key={index} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
                         <td style={{ padding: '12px', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
                           {new Date(log.created_at || log.timestamp).toLocaleTimeString()}

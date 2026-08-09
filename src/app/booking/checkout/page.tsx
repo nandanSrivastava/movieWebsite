@@ -8,6 +8,7 @@ import Footer from '@/features/shared/components/Footer';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { ShowType, SeatStatusType } from '@/lib/db';
+import { useQuery } from '@tanstack/react-query';
 
 // RFC-4122 Compliant UUID Generator
 function generateUUID() {
@@ -40,9 +41,6 @@ function CheckoutContent() {
   const seatIdsStr = searchParams.get('seats') || '';
   const seatLayoutIds = seatIdsStr ? seatIdsStr.split(',') : [];
 
-  const [show, setShow] = useState<ShowType | null>(null);
-  const [seats, setSeats] = useState<SeatStatusType[]>([]);
-  const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
 
   // Form Fields
@@ -62,35 +60,39 @@ function CheckoutContent() {
     }
   }, [user]);
 
-  // Load ticket show and seat definitions
-  useEffect(() => {
-    if (!showId) return;
-    
-    const loadDetails = async () => {
-      try {
-        const res = await fetch(`/api/seats/status?showId=${showId}`);
-        if (!res.ok) throw new Error('Failed to load show seats details');
-        const data = await res.json();
-        
-        // Fetch show details
-        const allShowsRes = await fetch('/api/shows');
-        if (allShowsRes.ok) {
-          const showsData = await allShowsRes.json();
-          const match = showsData.shows?.find((s: any) => s.id === showId);
-          if (match) setShow(match);
-        }
-        
-        setSeats(data.seats);
-      } catch (err) {
-        console.error(err);
-        showToast('Error loading booking checkout details.', 'error');
-      } finally {
-        setLoading(false);
+  const { data, isLoading: loading, error } = useQuery({
+    queryKey: ['checkoutDetails', showId],
+    queryFn: async () => {
+      const [seatsRes, showsRes] = await Promise.all([
+        fetch(`/api/seats/status?showId=${showId}`),
+        fetch('/api/shows')
+      ]);
+      
+      if (!seatsRes.ok) throw new Error('Failed to load show seats details');
+      
+      const seatsData = await seatsRes.json();
+      let showMatch = null;
+      if (showsRes.ok) {
+        const showsData = await showsRes.json();
+        showMatch = showsData.shows?.find((s: any) => s.id === showId) || null;
       }
-    };
+      
+      return {
+        seats: seatsData.seats as SeatStatusType[],
+        show: showMatch as ShowType | null
+      };
+    },
+    enabled: !!showId,
+  });
 
-    loadDetails();
-  }, [showId, showToast]);
+  useEffect(() => {
+    if (error) {
+      showToast('Error loading booking checkout details.', 'error');
+    }
+  }, [error, showToast]);
+
+  const seats = data?.seats || [];
+  const show = data?.show || null;
 
   // Handle Checkout Click
   const handleCheckoutSubmit = async (e: React.FormEvent) => {

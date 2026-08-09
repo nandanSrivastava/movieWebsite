@@ -6,7 +6,7 @@ export default function Footer() {
     <>
       <style dangerouslySetInnerHTML={{ __html: `
         .site-footer {
-          background: #030304;
+          background: var(--bg-void);
           border-top: 1px solid rgba(255,255,255,0.05);
           padding: 80px 0 40px;
           position: relative;
@@ -20,7 +20,7 @@ export default function Footer() {
           transform: translateX(-50%);
           width: 600px;
           height: 1px;
-          background: linear-gradient(to right, transparent, rgba(212,175,55,0.4), transparent);
+          background: linear-gradient(to right, transparent, rgba(0, 162, 255, 0.5), transparent);
         }
         .footer-grid {
           display: grid;
@@ -48,10 +48,10 @@ export default function Footer() {
           width: 32px;
           height: 32px;
           border-radius: 7px;
-          border: 1px solid rgba(212,175,55,0.3);
+          border: 1px solid rgba(0, 162, 255, 0.3);
           object-fit: cover;
         }
-        .footer-brand-name span { color: #D4AF37; }
+        .footer-brand-name span { color: var(--blue-500); }
         .footer-desc {
           font-size: 0.9rem;
           line-height: 1.75;
@@ -77,8 +77,8 @@ export default function Footer() {
           transition: all 0.2s ease;
         }
         .footer-social-link:hover {
-          background: rgba(212,175,55,0.10);
-          border-color: rgba(212,175,55,0.30);
+          background: rgba(0, 162, 255, 0.10);
+          border-color: rgba(0, 162, 255, 0.30);
           transform: translateY(-2px);
         }
         .footer-col-title {
@@ -104,7 +104,7 @@ export default function Footer() {
           align-items: center;
           gap: 8px;
         }
-        .footer-link:hover { color: #D4AF37; }
+        .footer-link:hover { color: var(--blue-500); }
         .footer-link .link-icon {
           font-size: 0.85rem;
           width: 18px;
@@ -123,7 +123,7 @@ export default function Footer() {
           font-size: 0.8rem;
           color: rgba(255,255,255,0.25);
         }
-        .footer-copy span { color: rgba(212,175,55,0.5); }
+        .footer-copy span { color: rgba(255, 184, 0, 0.8); }
         .footer-legal {
           display: flex;
           gap: 24px;

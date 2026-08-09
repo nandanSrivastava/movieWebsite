@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
     const body = await req.json();
-    const { title, synopsis, genre, language, duration_minutes, certification, poster_url, trailer_url } = body;
+    const { title, synopsis, genre, language, duration_minutes, certification, poster_url, trailer_url, is_featured } = body;
 
     if (!title) {
       return NextResponse.json({ error: 'Movie title is required' }, { status: 400 });
@@ -83,6 +83,7 @@ export async function POST(req: NextRequest) {
       certification: certification || 'UA',
       poster_url: poster_url || '',
       trailer_url: trailer_url || '',
+      is_featured: !!is_featured,
       is_active: true
     });
 

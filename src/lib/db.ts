@@ -20,6 +20,7 @@ export interface Movie {
   certification: string;
   poster_url: string;
   trailer_url: string;
+  is_featured: boolean;
   is_active: boolean;
   created_at: string;
 }
@@ -207,6 +208,7 @@ class MockDatabase implements DatabaseClient {
       certification: 'UA',
       poster_url: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=400&auto=format&fit=crop',
       trailer_url: 'https://www.youtube.com/embed/g6j3k4rK7u4',
+      is_featured: true,
       is_active: true,
       created_at: new Date().toISOString()
     });
@@ -221,6 +223,7 @@ class MockDatabase implements DatabaseClient {
       certification: 'U',
       poster_url: 'https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=400&auto=format&fit=crop',
       trailer_url: 'https://www.youtube.com/embed/6COmYeLsz4c',
+      is_featured: false,
       is_active: true,
       created_at: new Date().toISOString()
     });
@@ -235,6 +238,7 @@ class MockDatabase implements DatabaseClient {
       certification: 'UA',
       poster_url: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=400&auto=format&fit=crop',
       trailer_url: 'https://www.youtube.com/embed/Way9Dexny3w',
+      is_featured: true,
       is_active: true,
       created_at: new Date().toISOString()
     });
@@ -249,6 +253,7 @@ class MockDatabase implements DatabaseClient {
       certification: 'UA',
       poster_url: 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=400&auto=format&fit=crop',
       trailer_url: 'https://www.youtube.com/embed/d9MyW72ELq0',
+      is_featured: false,
       is_active: true,
       created_at: new Date().toISOString()
     });
@@ -263,6 +268,7 @@ class MockDatabase implements DatabaseClient {
       certification: 'A',
       poster_url: 'https://images.unsplash.com/photo-1533518463841-d62e1fc91373?q=80&w=400&auto=format&fit=crop',
       trailer_url: 'https://www.youtube.com/embed/uYPbbksJxIg',
+      is_featured: false,
       is_active: true,
       created_at: new Date().toISOString()
     });
@@ -277,6 +283,7 @@ class MockDatabase implements DatabaseClient {
       certification: 'A',
       poster_url: 'https://images.unsplash.com/photo-1608889175250-c3b0c1667d3a?q=80&w=400&auto=format&fit=crop',
       trailer_url: 'https://www.youtube.com/embed/73_1biulkYk',
+      is_featured: false,
       is_active: true,
       created_at: new Date().toISOString()
     });

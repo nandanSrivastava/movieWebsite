@@ -7,14 +7,25 @@ import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
+import { useQuery } from '@tanstack/react-query';
 
 export default function CounterPOSPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useCineBookAuth();
   const { showToast } = useToast();
 
-  const [shows, setShows] = useState<any[]>([]);
-  const [loadingShows, setLoadingShows] = useState(true);
+  const { data: showsData, isLoading: loadingShows, error } = useQuery({
+    queryKey: ['counterShows'],
+    queryFn: async () => {
+      const res = await fetch('/api/shows');
+      if (!res.ok) throw new Error('Failed to load shows');
+      const data = await res.json();
+      return data.shows || [];
+    },
+    enabled: !!user && ['admin', 'member'].includes(user.role),
+  });
+
+  const shows = showsData || [];
 
   // Verification State
   const [tokenInput, setTokenInput] = useState('');
@@ -29,25 +40,11 @@ export default function CounterPOSPage() {
     }
   }, [user, authLoading, router]);
 
-  // Load showtimes for box office sales
   useEffect(() => {
-    if (user && ['admin', 'member'].includes(user.role)) {
-      const loadShows = async () => {
-        try {
-          const res = await fetch('/api/shows');
-          if (!res.ok) throw new Error('Failed to load shows');
-          const data = await res.json();
-          setShows(data.shows || []);
-        } catch (err) {
-          console.error(err);
-          showToast('Error loading active shows list for ticket sales.', 'error');
-        } finally {
-          setLoadingShows(false);
-        }
-      };
-      loadShows();
+    if (error) {
+      showToast('Error loading active shows list for ticket sales.', 'error');
     }
-  }, [user, showToast]);
+  }, [error, showToast]);
 
   // Handle Ticket Scan Verification
   const handleVerifySubmit = async (e: React.FormEvent) => {
@@ -243,7 +240,7 @@ export default function CounterPOSPage() {
                 <p style={{ color: 'var(--text-muted)' }}>No showtimes currently scheduled.</p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  {shows.map((show) => (
+                  {shows.map((show: any) => (
                     <div 
                       key={show.id}
                       style={{

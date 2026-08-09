@@ -26,25 +26,39 @@ export default function Header() {
     <>
       <style dangerouslySetInnerHTML={{ __html: `
         .site-header {
-          position: sticky;
-          top: 0;
-          left: 0;
-          right: 0;
+          position: fixed;
+          top: 24px;
+          left: 50%;
+          transform: translateX(-50%);
+          width: calc(100% - 48px);
+          max-width: var(--max-width);
           z-index: 1000;
-          height: var(--header-height);
+          height: 72px;
           display: flex;
           align-items: center;
-          transition: all 0.3s ease;
+          transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+          border-radius: 99px;
+          background: rgba(10, 16, 36, 0.95);
+          border: 1px solid rgba(255,255,255,0.08);
+          box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+        }
+        @media (max-width: 768px) {
+          .site-header {
+            top: 12px;
+            width: calc(100% - 24px);
+            border-radius: 20px;
+          }
         }
         .site-header.scrolled {
-          background: rgba(5,5,7,0.85);
-          backdrop-filter: blur(24px) saturate(160%);
-          -webkit-backdrop-filter: blur(24px) saturate(160%);
-          border-bottom: 1px solid rgba(255,255,255,0.06);
-          box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+          background: rgba(5, 8, 20, 0.95);
+          border-color: rgba(255, 255, 255, 0.15);
+          box-shadow: 0 15px 50px rgba(0,0,0,0.6), 0 0 30px rgba(0, 162, 255, 0.1);
+          top: 16px;
         }
         .site-header.top {
-          background: linear-gradient(to bottom, rgba(0,0,0,0.6) 0%, transparent 100%);
+          background: rgba(10, 16, 36, 0.2);
+          border-color: rgba(255, 255, 255, 0.05);
+          box-shadow: none;
         }
 
         .hdr-inner {
@@ -67,13 +81,13 @@ export default function Header() {
           height: 38px;
           border-radius: 10px;
           overflow: hidden;
-          border: 1.5px solid var(--border-gold);
-          box-shadow: 0 0 18px var(--gold-glow);
+          border: 1.5px solid var(--border-strong);
+          box-shadow: 0 0 18px var(--blue-glow);
           flex-shrink: 0;
           transition: box-shadow 0.3s ease;
         }
         .hdr-logo:hover .hdr-logo-mark {
-          box-shadow: 0 0 28px var(--gold-glow-strong);
+          box-shadow: 0 0 28px var(--blue-glow-strong);
         }
         .hdr-logo-mark img {
           width: 100%;
@@ -93,7 +107,7 @@ export default function Header() {
           letter-spacing: -0.01em;
         }
         .hdr-logo-name span {
-          color: var(--gold-500);
+          color: var(--blue-500);
         }
         .hdr-logo-sub {
           font-size: 0.65rem;
@@ -130,7 +144,7 @@ export default function Header() {
           left: 0;
           width: 0;
           height: 1.5px;
-          background: var(--gold-500);
+          background: var(--blue-500);
           transition: width 0.25s ease;
           border-radius: 99px;
         }
@@ -176,9 +190,9 @@ export default function Header() {
           border: 1px solid rgba(16,185,129,0.2);
         }
         .hdr-role-member {
-          background: rgba(197,168,128,0.12);
-          color: var(--gold-500);
-          border: 1px solid rgba(197,168,128,0.2);
+          background: rgba(0, 162, 255, 0.12);
+          color: var(--blue-500);
+          border: 1px solid rgba(0, 162, 255, 0.2);
         }
         .hdr-role-user {
           background: rgba(96,165,250,0.12);
@@ -276,6 +290,7 @@ export default function Header() {
 
         </div>
       </header>
+      {pathname !== '/' && <div style={{ height: '110px' }} />}
     </>
   );
 }

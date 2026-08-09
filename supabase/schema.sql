@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS public.movies (
   certification     TEXT NOT NULL DEFAULT 'UA',
   poster_url        TEXT NOT NULL DEFAULT '',
   trailer_url       TEXT NOT NULL DEFAULT '',
+  is_featured       BOOLEAN NOT NULL DEFAULT FALSE,
   is_active         BOOLEAN NOT NULL DEFAULT TRUE,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

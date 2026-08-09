@@ -7,6 +7,7 @@ import { useToast } from '@/features/shared/context/ToastContext';
 import { ShowType, SeatStatusType } from '@/lib/db';
 import { isMockMode } from '@/lib/config';
 import { createClient } from '@supabase/supabase-js';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 interface SeatingMapClientProps {
   show: ShowType;
@@ -18,7 +19,8 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
   const { user } = useCineBookAuth();
   const { showToast } = useToast();
 
-  const [seats, setSeats] = useState<SeatStatusType[]>(initialSeats);
+  const queryClient = useQueryClient();
+
   const [selectedSeats, setSelectedSeats] = useState<Set<string>>(new Set());
   const [isLocked, setIsLocked] = useState(false);
   const [timer, setTimer] = useState(360); // 6 minutes in seconds
@@ -26,23 +28,21 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
   
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Helper fetcher
-  const fetchSeats = async () => {
-    try {
+  const { data: seats = initialSeats, refetch } = useQuery({
+    queryKey: ['seats', show.id],
+    queryFn: async () => {
       const res = await fetch(`/api/seats/status?showId=${show.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSeats(data.seats);
-      }
-    } catch (err) {
-      console.error('Failed polling seat status:', err);
-    }
-  };
+      if (!res.ok) throw new Error('Failed fetching seats');
+      const data = await res.json();
+      return data.seats as SeatStatusType[];
+    },
+    initialData: initialSeats,
+    refetchInterval: 4000,
+  });
 
   // ── 1. REALTIME SEATING POLLING & REALTIME SYNC ──────────────
   useEffect(() => {
-    // 1. Setup polling interval
-    const interval = setInterval(fetchSeats, 4000);
+    // 1. React Query refetchInterval handles polling now.
 
     // 2. Setup Realtime subscription in live mode
     let channel: any = null;
@@ -63,14 +63,13 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
             filter: `show_id=eq.${show.id}`
           },
           () => {
-            fetchSeats(); // Reload grid on any seat change
+            queryClient.invalidateQueries({ queryKey: ['seats', show.id] }); // Reload grid on any seat change
           }
         )
         .subscribe();
     }
 
     return () => {
-      clearInterval(interval);
       if (channel) {
         channel.unsubscribe();
       }
@@ -121,11 +120,7 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
     
     setSelectedSeats(new Set());
     // Refresh seat maps
-    const res = await fetch(`/api/seats/status?showId=${show.id}`);
-    if (res.ok) {
-      const data = await res.json();
-      setSeats(data.seats);
-    }
+    queryClient.invalidateQueries({ queryKey: ['seats', show.id] });
   };
 
   // ── 3. SEAT SELECTION CLICK HANDLERS ─────────────────────────
@@ -203,11 +198,7 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
       showToast(err.message || 'Failed to secure seat locks. Please try another seat.', 'error');
       
       // Refresh layouts
-      const res = await fetch(`/api/seats/status?showId=${show.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSeats(data.seats);
-      }
+      queryClient.invalidateQueries({ queryKey: ['seats', show.id] });
     } finally {
       setSubmitting(false);
     }

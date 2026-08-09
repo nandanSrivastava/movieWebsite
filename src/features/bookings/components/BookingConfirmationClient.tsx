@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
 import { useToast } from '@/features/shared/context/ToastContext';
+import { useQuery } from '@tanstack/react-query';
 
 interface BookingConfirmationClientProps {
   initialBooking: any;
@@ -14,67 +15,57 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
   const router = useRouter();
   const { showToast } = useToast();
   
-  const [booking, setBooking] = useState<any>(initialBooking);
-  const [status, setStatus] = useState<string>(initialBooking.payment_status);
-  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
   const [pollingAttempts, setPollingAttempts] = useState(0);
+  const [hasNotified, setHasNotified] = useState(false);
 
-  // ── 1. WEBHOOK COMPLETION POLLING ────────────────────────────
+  // ── 1. WEBHOOK COMPLETION POLLING WITH REACT QUERY ───────────
+  const { data: booking } = useQuery({
+    queryKey: ['bookingStatus', initialBooking.id],
+    queryFn: async () => {
+      setPollingAttempts(p => p + 1);
+      const res = await fetch(`/api/bookings/status?bookingId=${initialBooking.id}`);
+      if (!res.ok) throw new Error('Status check failed');
+      return await res.json();
+    },
+    refetchInterval: (query) => {
+      // In React Query v5, query is passed to refetchInterval.
+      // query.state.data is the current data.
+      if (query.state?.data?.payment_status !== 'pending' || pollingAttempts >= 20) return false;
+      return 1500;
+    },
+    initialData: initialBooking,
+  });
+
+  const status = booking?.payment_status || 'pending';
+
   useEffect(() => {
-    if (status !== 'pending') return;
-
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/bookings/status?bookingId=${booking.id}`);
-        if (!res.ok) throw new Error('Status check failed');
-        
-        const data = await res.json();
-        
-        if (data.payment_status !== 'pending') {
-          setStatus(data.payment_status);
-          setBooking(data);
-          clearInterval(interval);
-
-          if (data.payment_status === 'paid') {
-            showToast('Ticket confirmed successfully!', 'success');
-          } else if (data.payment_status === 'failed' || data.payment_status === 'refunded') {
-            showToast('Booking hold expired before payment finalized. Refund initiated.', 'error');
-          }
-        }
-      } catch (err) {
-        console.error('Polling status error:', err);
+    if (status !== 'pending' && !hasNotified) {
+      setHasNotified(true);
+      if (status === 'paid') {
+        showToast('Ticket confirmed successfully!', 'success');
+      } else if (status === 'failed' || status === 'refunded') {
+        showToast('Booking hold expired before payment finalized. Refund initiated.', 'error');
       }
-
-      setPollingAttempts((prev) => {
-        // Cap polling at 20 attempts (30 seconds) to prevent infinite loops
-        if (prev >= 20) {
-          clearInterval(interval);
-          showToast('Payment confirmation is taking longer than expected. Please check your email or refresh.', 'info');
-        }
-        return prev + 1;
-      });
-    }, 1500);
-
-    return () => clearInterval(interval);
-  }, [status, booking.id, showToast]);
-
-  // ── 2. QR CODE DATA URL GENERATOR ────────────────────────────
-  useEffect(() => {
-    if (status === 'paid' && booking.qr_code_token) {
-      const loadQr = async () => {
-        try {
-          const res = await fetch(`/api/checkout/qr?token=${encodeURIComponent(booking.qr_code_token)}`);
-          if (res.ok) {
-            const data = await res.json();
-            setQrCodeUrl(data.qrCode);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      };
-      loadQr();
     }
-  }, [status, booking]);
+    
+    if (pollingAttempts >= 20 && status === 'pending' && !hasNotified) {
+      setHasNotified(true);
+      showToast('Payment confirmation is taking longer than expected. Please check your email or refresh.', 'info');
+    }
+  }, [status, pollingAttempts, hasNotified, showToast]);
+
+  // ── 2. QR CODE GENERATOR WITH REACT QUERY ────────────────────
+  const { data: qrCodeData } = useQuery({
+    queryKey: ['qrCode', booking?.qr_code_token],
+    queryFn: async () => {
+      const res = await fetch(`/api/checkout/qr?token=${encodeURIComponent(booking.qr_code_token)}`);
+      if (!res.ok) throw new Error('Failed to generate QR');
+      return await res.json();
+    },
+    enabled: status === 'paid' && !!booking?.qr_code_token,
+  });
+
+  const qrCodeUrl = qrCodeData?.qrCode || null;
 
   // Helpers
   const formatTimeLabel = (timeStr: string) => {
@@ -99,7 +90,7 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
     }
   };
 
-  const seatLabels = booking.booking_seats?.map((bs: any) => `${bs.seat_layout?.row_label}-${bs.seat_layout?.seat_number}`).join(', ') || '';
+  const seatLabels = booking?.booking_seats?.map((bs: any) => `${bs.seat_layout?.row_label}-${bs.seat_layout?.seat_number}`).join(', ') || '';
 
   // ── 3. RENDER STATES ─────────────────────────────────────────
 
@@ -174,7 +165,7 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
           Any money deducted has been automatically refunded.
         </p>
         <button 
-          onClick={() => router.replace(`/booking/${booking.show_id}`)}
+          onClick={() => router.replace(`/booking/${booking?.show_id}`)}
           className="btn btn-primary"
           style={{ padding: '12px 28px' }}
         >
@@ -266,10 +257,10 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
           </div>
 
           <h3 style={{ fontSize: '1.5rem', fontWeight: 800, marginTop: '8px', fontFamily: 'var(--font-family-heading)', lineHeight: 1.2, color: '#FFFFFF' }}>
-            {booking.show?.movie?.title}
+            {booking?.show?.movie?.title}
           </h3>
           <p style={{ fontSize: '0.85rem', color: '#9CA3AF', marginTop: '4px' }}>
-            {booking.show?.movie?.genre} • {booking.show?.movie?.duration_minutes} Mins
+            {booking?.show?.movie?.genre} • {booking?.show?.movie?.duration_minutes} Mins
           </p>
         </div>
 
@@ -280,13 +271,13 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
             <div>
               <span style={{ fontSize: '0.75rem', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Date</span>
               <p style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: '2px', color: '#FFFFFF' }}>
-                {booking.show ? formatDateLabel(booking.show.show_date) : ''}
+                {booking?.show ? formatDateLabel(booking.show.show_date) : ''}
               </p>
             </div>
             <div style={{ textAlign: 'right' }}>
               <span style={{ fontSize: '0.75rem', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Show Time</span>
               <p style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: '2px', color: '#FFFFFF' }}>
-                {booking.show ? formatTimeLabel(booking.show.show_time) : ''}
+                {booking?.show ? formatTimeLabel(booking.show.show_time) : ''}
               </p>
             </div>
           </div>
@@ -295,7 +286,7 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
             <div>
               <span style={{ fontSize: '0.75rem', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Screen</span>
               <p style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: '2px', color: '#FFFFFF' }}>
-                {booking.show?.screen?.name}
+                {booking?.show?.screen?.name}
               </p>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -330,7 +321,7 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
               </div>
             )}
             <span style={{ fontSize: '0.7rem', color: '#9CA3AF', fontWeight: 500, letterSpacing: '0.5px' }}>
-              Verification ID: {booking.id}
+              Verification ID: {booking?.id}
             </span>
           </div>
 
@@ -338,10 +329,10 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
 
           {/* Customer Metadata details */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem', color: '#9CA3AF' }}>
-            <p>👤 <strong style={{ color: '#FFFFFF' }}>Holder:</strong> {booking.customer_name || 'Customer'}</p>
-            <p>📞 <strong style={{ color: '#FFFFFF' }}>Phone:</strong> {booking.customer_phone || ''}</p>
-            <p>🧾 <strong style={{ color: '#FFFFFF' }}>Ref ID:</strong> {booking.razorpay_payment_id || 'Mock Payment'}</p>
-            <p>💳 <strong style={{ color: '#FFFFFF' }}>Amount Paid:</strong> <span style={{ color: 'var(--highlight-gold)', fontWeight: 'bold' }}>₹{booking.total_amount}</span></p>
+            <p>👤 <strong style={{ color: '#FFFFFF' }}>Holder:</strong> {booking?.customer_name || 'Customer'}</p>
+            <p>📞 <strong style={{ color: '#FFFFFF' }}>Phone:</strong> {booking?.customer_phone || ''}</p>
+            <p>🧾 <strong style={{ color: '#FFFFFF' }}>Ref ID:</strong> {booking?.razorpay_payment_id || 'Mock Payment'}</p>
+            <p>💳 <strong style={{ color: '#FFFFFF' }}>Amount Paid:</strong> <span style={{ color: 'var(--highlight-gold)', fontWeight: 'bold' }}>₹{booking?.total_amount}</span></p>
           </div>
 
           <div style={{

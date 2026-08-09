@@ -133,7 +133,7 @@ function LoginContent() {
             letterSpacing: '-0.5px',
             color: '#FFFFFF'
           }}>
-            CINE<span style={{ color: 'var(--accent-crimson)' }}>BOOK</span>
+            Dhrub <span style={{ color: 'var(--accent-crimson)' }}>Cineplex</span>
           </h1>
           <p style={{
             color: 'var(--text-secondary)',

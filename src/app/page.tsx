@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { db } from '@/lib/db';
 import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
+import HeroCarousel from '@/features/movies/components/HeroCarousel';
+import MovieCarousel from '@/features/movies/components/MovieCarousel';
 
 export const revalidate = 60;
 
@@ -12,602 +14,585 @@ export default async function Home() {
     movies = await db.getMovies();
   } catch (err) {
     console.error('[Home] Failed to load movies from DB:', err);
-    // Page renders with empty state rather than crashing
   }
-  const hero = movies[0];
-  const rest = movies.slice(1);
+  const featuredMovies = movies.filter(m => m.is_featured);
+  const heroMovies = featuredMovies.length > 0 ? featuredMovies : [movies[0]].filter(Boolean);
 
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: `
-        /* ── HERO ──────────────────────────────────── */
-        .hero-section {
+        /* Custom Styles for Premium Home Page */
+        .premium-hero {
           position: relative;
           height: 100svh;
-          min-height: 700px;
-          max-height: 1000px;
-          width: 100%;
+          min-height: 800px;
           display: flex;
-          align-items: flex-end;
+          align-items: center;
+          justify-content: center;
           overflow: hidden;
           margin-top: calc(-1 * var(--header-height));
         }
-        .hero-bg {
+
+        .premium-hero-bg {
           position: absolute;
           inset: 0;
           z-index: 0;
         }
-        .hero-bg img {
+
+        .premium-hero-bg img {
           width: 100%;
           height: 100%;
           object-fit: cover;
-          object-position: center 20%;
-          filter: brightness(0.55) saturate(1.2);
-          transform-origin: center;
-          animation: heroZoom 12s ease-in-out alternate infinite;
+          object-position: center 30%;
+          filter: brightness(0.65) contrast(1.1) saturate(1.2);
+          transform: scale(1.05);
+          animation: cinematicPan 20s ease-in-out infinite alternate;
         }
-        @keyframes heroZoom {
-          from { transform: scale(1.00); }
-          to   { transform: scale(1.06); }
+
+        @keyframes cinematicPan {
+          from { transform: scale(1.05) translate(0, 0); }
+          to { transform: scale(1.1) translate(-2%, 2%); }
         }
-        .hero-gradient-left {
+
+        .premium-vignette {
+          position: absolute;
+          inset: 0;
+          background: radial-gradient(circle at center, transparent 30%, rgba(3, 4, 8, 0.8) 100%);
+          z-index: 1;
+        }
+
+        .premium-gradient {
           position: absolute;
           inset: 0;
           background: linear-gradient(
-            105deg,
-            #050507 0%,
-            rgba(5,5,7,0.85) 30%,
-            rgba(5,5,7,0.30) 65%,
-            transparent 100%
+            180deg,
+            rgba(3, 4, 8, 0.9) 0%,
+            rgba(3, 4, 8, 0.2) 20%,
+            transparent 50%,
+            rgba(3, 4, 8, 0.9) 80%,
+            var(--bg-void) 100%
           );
+          z-index: 1;
         }
-        .hero-gradient-bottom {
-          position: absolute;
-          bottom: 0; left: 0; right: 0;
-          height: 55%;
-          background: linear-gradient(
-            to top,
-            #050507 0%,
-            rgba(5,5,7,0.9) 20%,
-            transparent 100%
-          );
-        }
-        .hero-content {
+
+        .hero-content-wrapper {
           position: relative;
           z-index: 2;
-          padding-bottom: clamp(140px, 18vh, 220px);
           width: 100%;
+          max-width: var(--max-width);
+          padding: 0 5vw;
+          margin-top: 15vh;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          text-align: center;
         }
-        .hero-eyebrow {
+
+        .hero-badge {
           display: inline-flex;
           align-items: center;
-          gap: 8px;
-          padding: 6px 14px;
-          background: rgba(197,168,128,0.10);
-          border: 1px solid rgba(197,168,128,0.22);
-          border-radius: 99px;
-          font-size: 0.78rem;
-          font-weight: 700;
-          letter-spacing: 0.12em;
+          gap: 12px;
+          padding: 8px 24px;
+          background: rgba(212, 175, 55, 0.1);
+          border: 1px solid rgba(212, 175, 55, 0.3);
+          border-radius: 100px;
+          backdrop-filter: blur(10px);
+          font-family: var(--font-heading);
+          font-size: 0.85rem;
+          font-weight: 600;
+          letter-spacing: 0.2em;
           text-transform: uppercase;
-          color: var(--gold-500);
-          margin-bottom: 24px;
+          color: var(--gold-400);
+          margin-bottom: 32px;
+          animation: float 6s ease-in-out infinite;
         }
-        .hero-eyebrow::before {
-          content: '';
+
+        .hero-badge-dot {
           width: 6px;
           height: 6px;
+          background-color: var(--crimson);
           border-radius: 50%;
-          background: var(--gold-500);
-          box-shadow: 0 0 6px var(--gold-500);
-          animation: pulse 2s infinite;
+          box-shadow: 0 0 10px var(--crimson);
+          animation: pulseCrimson 2s infinite;
         }
-        @keyframes pulse {
-          0%,100% { opacity:1; transform:scale(1); }
-          50%      { opacity:0.4; transform:scale(1.4); }
+
+        @keyframes pulseCrimson {
+          0% { box-shadow: 0 0 0 0 rgba(139, 30, 40, 0.7); }
+          70% { box-shadow: 0 0 0 10px rgba(139, 30, 40, 0); }
+          100% { box-shadow: 0 0 0 0 rgba(139, 30, 40, 0); }
         }
-        .hero-title {
-          font-family: 'Playfair Display', serif;
-          font-size: clamp(3rem, 7vw, 6.5rem);
-          font-weight: 800;
-          line-height: 1;
-          letter-spacing: -0.02em;
-          color: #fff;
-          text-shadow: 0 4px 40px rgba(0,0,0,0.6);
-          margin-bottom: 20px;
-          max-width: 760px;
-        }
-        .hero-meta {
-          display: flex;
-          align-items: center;
-          gap: 0;
-          margin-bottom: 24px;
-          flex-wrap: wrap;
-        }
-        .hero-meta-item {
-          font-size: 0.95rem;
-          font-weight: 500;
-          color: rgba(255,255,255,0.7);
-          padding: 0 16px;
-          border-right: 1px solid rgba(255,255,255,0.2);
-        }
-        .hero-meta-item:first-child { padding-left: 0; }
-        .hero-meta-item:last-child { border-right: none; }
-        .hero-meta-cert {
-          color: var(--gold-500);
+
+        .premium-title {
+          font-family: var(--font-display);
+          font-size: clamp(3.5rem, 8vw, 7.5rem);
           font-weight: 700;
-        }
-        .hero-synopsis {
-          font-size: 1.05rem;
-          line-height: 1.7;
-          color: rgba(255,255,255,0.65);
-          max-width: 560px;
-          margin-bottom: 40px;
-          display: -webkit-box;
-          -webkit-line-clamp: 3;
-          -webkit-box-orient: vertical;
-          overflow: hidden;
-        }
-        .hero-ctas {
-          display: flex;
-          gap: 14px;
-          flex-wrap: wrap;
+          line-height: 1.05;
+          color: var(--text-primary);
+          text-shadow: 0 10px 30px rgba(0,0,0,0.8);
+          margin-bottom: 24px;
+          letter-spacing: -0.01em;
+          background: linear-gradient(to bottom, #FFFFFF 0%, #D1C4A5 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
         }
 
-        /* ── SCROLL INDICATOR ───────────────────────── */
-        .scroll-indicator {
-          position: absolute;
-          bottom: 30px;
-          left: 50%;
-          transform: translateX(-50%);
-          z-index: 2;
+        .premium-meta {
           display: flex;
-          flex-direction: column;
           align-items: center;
-          gap: 8px;
-          opacity: 0.5;
-          animation: fadeIn 2s 1.5s both;
-        }
-        .scroll-indicator span {
-          font-size: 0.7rem;
-          letter-spacing: 0.15em;
-          text-transform: uppercase;
-          color: #fff;
-        }
-        .scroll-mouse {
-          width: 22px;
-          height: 34px;
-          border: 1.5px solid rgba(255,255,255,0.4);
-          border-radius: 11px;
-          display: flex;
-          align-items: flex-start;
           justify-content: center;
-          padding-top: 5px;
-        }
-        .scroll-mouse::after {
-          content: '';
-          width: 3px;
-          height: 7px;
-          background: #fff;
-          border-radius: 99px;
-          animation: scrollDown 1.5s ease infinite;
-        }
-        @keyframes scrollDown {
-          from { opacity:1; transform:translateY(0); }
-          to   { opacity:0; transform:translateY(10px); }
+          gap: 20px;
+          font-family: var(--font-heading);
+          font-size: 1rem;
+          font-weight: 500;
+          color: rgba(255, 255, 255, 0.8);
+          margin-bottom: 32px;
         }
 
-        /* ── NOW PLAYING RAIL ───────────────────────── */
-        .rail-section {
-          position: relative;
-          z-index: 3;
-          margin-top: 0;
-          padding-top: 60px;
-          padding-bottom: 80px;
+        .meta-dot {
+          width: 4px;
+          height: 4px;
+          background: var(--gold-500);
+          border-radius: 50%;
+          opacity: 0.5;
         }
-        .rail-header {
-          display: flex;
-          align-items: flex-end;
-          justify-content: space-between;
-          margin-bottom: 36px;
+
+        .premium-synopsis {
+          font-family: var(--font-body);
+          font-size: 1.1rem;
+          line-height: 1.8;
+          color: rgba(255, 255, 255, 0.65);
+          max-width: 650px;
+          margin: 0 auto 48px;
         }
-        .rail-title {
-          font-family: 'Outfit', sans-serif;
-          font-size: clamp(1.6rem, 3vw, 2.4rem);
-          font-weight: 800;
-          letter-spacing: -0.03em;
-          color: #fff;
-        }
-        .rail-subtitle {
-          font-size: 0.85rem;
-          color: rgba(255,255,255,0.4);
-          margin-top: 4px;
-        }
-        .rail-track {
+
+        .premium-actions {
           display: flex;
           gap: 20px;
+          justify-content: center;
+        }
+
+        .btn-premium {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          padding: 18px 42px;
+          border-radius: 4px;
+          font-family: var(--font-heading);
+          font-weight: 600;
+          font-size: 1rem;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
+          transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+          text-decoration: none;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .btn-premium::before {
+          content: '';
+          position: absolute;
+          top: 0; left: 0; width: 100%; height: 100%;
+          background: linear-gradient(120deg, transparent, rgba(255,255,255,0.2), transparent);
+          transform: translateX(-100%);
+          transition: transform 0.6s;
+        }
+
+        .btn-premium:hover::before {
+          transform: translateX(100%);
+        }
+
+        .btn-book {
+          background: var(--gold-500);
+          color: #000;
+          box-shadow: 0 4px 20px rgba(212, 175, 55, 0.2);
+        }
+
+        .btn-book:hover {
+          background: var(--gold-400);
+          transform: translateY(-2px);
+          box-shadow: 0 8px 30px rgba(212, 175, 55, 0.4);
+        }
+
+        .btn-trailer {
+          background: rgba(255, 255, 255, 0.05);
+          color: #fff;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          backdrop-filter: blur(10px);
+        }
+
+        .btn-trailer:hover {
+          background: rgba(255, 255, 255, 0.1);
+          border-color: rgba(255, 255, 255, 0.4);
+          transform: translateY(-2px);
+        }
+
+        /* Ambient Orbs */
+        .ambient-orb {
+          position: absolute;
+          border-radius: 50%;
+          filter: blur(100px);
+          opacity: 0.3;
+          z-index: 0;
+          pointer-events: none;
+        }
+        .orb-crimson {
+          background: var(--crimson);
+          width: 500px;
+          height: 500px;
+          top: -10%;
+          right: -10%;
+        }
+        .orb-gold {
+          background: var(--gold-500);
+          width: 600px;
+          height: 600px;
+          bottom: -20%;
+          left: -10%;
+          opacity: 0.15;
+        }
+
+        /* Movie Rail Premium */
+        .rail-section {
+          padding: 80px 0 120px;
+          position: relative;
+          z-index: 2;
+          background: var(--bg-void);
+        }
+
+        .section-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-end;
+          margin-bottom: 48px;
+          padding: 0 20px;
+          max-width: var(--max-width);
+          margin-left: auto;
+          margin-right: auto;
+        }
+
+        .section-title {
+          font-family: var(--font-display);
+          font-size: clamp(2rem, 4vw, 3rem);
+          font-weight: 600;
+          color: #fff;
+        }
+
+        .section-subtitle {
+          font-family: var(--font-heading);
+          color: var(--gold-500);
+          font-size: 0.9rem;
+          letter-spacing: 0.15em;
+          text-transform: uppercase;
+          margin-bottom: 12px;
+          display: block;
+        }
+
+        .view-all {
+          color: rgba(255, 255, 255, 0.6);
+          font-family: var(--font-heading);
+          font-size: 0.9rem;
+          font-weight: 500;
+          text-decoration: none;
+          transition: color 0.3s;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+
+        .view-all:hover {
+          color: var(--gold-500);
+        }
+
+        .rail-track {
+          display: flex;
+          gap: 32px;
           overflow-x: auto;
-          padding-bottom: 20px;
+          padding: 20px;
+          margin: 0 auto;
+          max-width: var(--max-width);
+          scroll-padding: 20px;
           -ms-overflow-style: none;
           scrollbar-width: none;
+          scroll-snap-type: x mandatory;
         }
+
         .rail-track::-webkit-scrollbar { display: none; }
 
-        /* Poster Card */
-        .pc-wrap {
+        .premium-poster {
           flex: 0 0 auto;
-          width: clamp(160px, 18vw, 230px);
+          width: clamp(240px, 22vw, 320px);
+          scroll-snap-align: start;
           text-decoration: none;
+          group;
         }
-        .pc-frame {
+
+        .poster-image-wrap {
           width: 100%;
           aspect-ratio: 2/3;
-          border-radius: 14px;
+          border-radius: 8px;
           overflow: hidden;
           position: relative;
-          box-shadow: 0 15px 40px rgba(0,0,0,0.7);
-          transition: transform 0.4s cubic-bezier(0.25,1,0.5,1), box-shadow 0.4s ease;
+          box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+          transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .pc-frame img {
+
+        .poster-image-wrap img {
           width: 100%;
           height: 100%;
           object-fit: cover;
-          transition: transform 0.5s ease;
+          transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .pc-frame:hover {
-          transform: translateY(-16px) scale(1.03);
-          box-shadow: 0 30px 70px rgba(0,0,0,0.9), 0 0 40px var(--gold-glow);
+
+        .premium-poster:hover .poster-image-wrap {
+          transform: translateY(-12px);
+          box-shadow: 0 30px 60px rgba(0,0,0,0.8), 0 0 40px rgba(212, 175, 55, 0.15);
+          border: 1px solid rgba(212, 175, 55, 0.3);
         }
-        .pc-frame:hover img { transform: scale(1.07); }
-        .pc-veil {
+
+        .premium-poster:hover .poster-image-wrap img {
+          transform: scale(1.08);
+        }
+
+        .poster-overlay {
           position: absolute;
           inset: 0;
-          background: linear-gradient(
-            to top,
-            rgba(0,0,0,0.97) 0%,
-            rgba(0,0,0,0.4) 45%,
-            transparent 100%
-          );
+          background: linear-gradient(to top, rgba(3,4,8,0.9) 0%, transparent 60%);
           opacity: 0;
-          transition: opacity 0.3s ease;
-          display: flex;
-          flex-direction: column;
-          justify-content: flex-end;
-          padding: 20px 16px;
-        }
-        .pc-frame:hover .pc-veil { opacity: 1; }
-        .pc-veil-play {
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          background: var(--gold-500);
+          transition: opacity 0.4s ease;
           display: flex;
           align-items: center;
           justify-content: center;
-          font-size: 14px;
-          color: #000;
-          margin-bottom: 10px;
-          box-shadow: 0 0 20px var(--gold-glow-strong);
         }
-        .pc-veil-label {
-          font-size: 0.88rem;
-          font-weight: 700;
-          color: #fff;
-          font-family: 'Outfit', sans-serif;
+
+        .premium-poster:hover .poster-overlay {
+          opacity: 1;
         }
-        .pc-info { margin-top: 14px; }
-        .pc-title {
-          font-size: 1rem;
-          font-weight: 700;
+
+        .book-now-badge {
+          background: var(--crimson);
+          color: white;
+          padding: 10px 24px;
+          border-radius: 100px;
+          font-family: var(--font-heading);
+          font-weight: 600;
+          font-size: 0.9rem;
+          letter-spacing: 0.05em;
+          transform: translateY(20px);
+          opacity: 0;
+          transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.1s;
+        }
+
+        .premium-poster:hover .book-now-badge {
+          transform: translateY(0);
+          opacity: 1;
+        }
+
+        .poster-info {
+          margin-top: 24px;
+          text-align: center;
+        }
+
+        .poster-title {
+          font-family: var(--font-display);
+          font-size: 1.25rem;
+          font-weight: 600;
           color: #fff;
-          font-family: 'Outfit', sans-serif;
+          margin-bottom: 8px;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-          margin-bottom: 5px;
         }
-        .pc-tags {
+
+        .poster-meta {
+          font-family: var(--font-heading);
+          font-size: 0.85rem;
+          color: rgba(255, 255, 255, 0.5);
           display: flex;
           align-items: center;
-          gap: 6px;
-          font-size: 0.78rem;
-          color: rgba(255,255,255,0.45);
-          font-weight: 500;
+          justify-content: center;
+          gap: 8px;
         }
-        .pc-cert {
+
+        .poster-cert {
           color: var(--gold-500);
+          border: 1px solid var(--gold-500);
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 0.7rem;
           font-weight: 700;
         }
 
-        /* ── SECTION: EXPERIENCE ────────────────────── */
-        .exp-section {
+        /* Experience Section */
+        .experience-section {
           padding: 120px 0;
+          background: var(--bg-primary);
           position: relative;
-          overflow: hidden;
+          border-top: 1px solid rgba(255,255,255,0.02);
+          border-bottom: 1px solid rgba(255,255,255,0.02);
         }
-        .exp-bg-orb-1 {
-          position: absolute;
-          top: -100px;
-          left: -150px;
-          width: 600px;
-          height: 600px;
-          background: radial-gradient(circle, rgba(197,168,128,0.04) 0%, transparent 70%);
-          pointer-events: none;
-        }
-        .exp-bg-orb-2 {
-          position: absolute;
-          bottom: -100px;
-          right: -150px;
-          width: 600px;
-          height: 600px;
-          background: radial-gradient(circle, rgba(150,40,40,0.03) 0%, transparent 70%);
-          pointer-events: none;
-        }
-        .exp-header {
-          text-align: center;
-          margin-bottom: 72px;
-        }
-        .exp-tagline {
-          display: inline-block;
-          font-size: 0.78rem;
-          font-weight: 700;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-          color: var(--gold-500);
-          margin-bottom: 16px;
-        }
-        .exp-title {
-          font-family: 'Playfair Display', serif;
-          font-size: clamp(2rem, 4vw, 3.5rem);
-          font-weight: 700;
-          font-style: italic;
-          color: #fff;
-          letter-spacing: -0.01em;
-        }
-        .exp-title em {
-          font-style: normal;
-          color: var(--gold-500);
-        }
+
         .exp-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-          gap: 24px;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 40px;
+          margin-top: 80px;
+          max-width: var(--max-width);
+          margin-left: auto;
+          margin-right: auto;
+          padding: 0 20px;
         }
+
         .exp-card {
-          padding: 44px 32px;
-          border-radius: 20px;
-          background: rgba(255,255,255,0.025);
-          border: 1px solid rgba(255,255,255,0.06);
-          transition: all 0.38s cubic-bezier(0.25,1,0.5,1);
+          padding: 40px;
+          background: var(--bg-card);
+          border-radius: 8px;
+          border: 1px solid rgba(255,255,255,0.03);
+          transition: all 0.4s ease;
           position: relative;
           overflow: hidden;
         }
-        .exp-card::after {
+
+        .exp-card::before {
           content: '';
           position: absolute;
-          bottom: 0;
-          left: 0;
-          width: 0;
-          height: 2px;
-          background: linear-gradient(to right, var(--gold-500), transparent);
-          transition: width 0.4s ease;
+          top: 0; left: 0; width: 100%; height: 2px;
+          background: linear-gradient(90deg, var(--gold-500), var(--crimson));
+          transform: scaleX(0);
+          transform-origin: left;
+          transition: transform 0.5s ease;
         }
+
         .exp-card:hover {
-          transform: translateY(-12px);
-          border-color: var(--border-gold);
-          background: rgba(255,255,255,0.03);
-          box-shadow: 0 24px 60px rgba(0,0,0,0.5), 0 0 40px var(--gold-glow);
+          background: var(--bg-elevated);
+          transform: translateY(-5px);
+          box-shadow: 0 20px 40px rgba(0,0,0,0.4);
         }
-        .exp-card:hover::after { width: 100%; }
+
+        .exp-card:hover::before {
+          transform: scaleX(1);
+        }
+
         .exp-icon {
-          font-size: 2.4rem;
-          margin-bottom: 22px;
-          display: block;
-          filter: drop-shadow(0 0 10px rgba(212,175,55,0.3));
-          transition: transform 0.3s ease;
+          font-size: 2.5rem;
+          margin-bottom: 24px;
+          background: linear-gradient(135deg, var(--gold-400), var(--gold-600));
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
         }
-        .exp-card:hover .exp-icon { transform: scale(1.15); }
-        .exp-card-title {
-          font-family: 'Outfit', sans-serif;
-          font-size: 1.2rem;
-          font-weight: 800;
+
+        .exp-title {
+          font-family: var(--font-display);
+          font-size: 1.5rem;
           color: #fff;
-          margin-bottom: 12px;
+          margin-bottom: 16px;
         }
-        .exp-card-body {
-          font-size: 0.93rem;
+
+        .exp-desc {
+          font-family: var(--font-body);
+          color: var(--text-secondary);
           line-height: 1.7;
-          color: rgba(255,255,255,0.5);
+          font-size: 0.95rem;
         }
 
-        /* ── SECTION: STATS BAR ─────────────────────── */
-        .stats-section {
-          padding: 70px 0;
-          border-top: 1px solid rgba(255,255,255,0.05);
-          border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-          gap: 0;
-        }
-        .stat-item {
-          text-align: center;
-          padding: 24px 16px;
-          border-right: 1px solid rgba(255,255,255,0.06);
-        }
-        .stat-item:last-child { border-right: none; }
-        .stat-number {
-          font-family: 'Playfair Display', serif;
-          font-size: 2.8rem;
-          font-weight: 800;
-          color: var(--gold-500);
-          letter-spacing: -0.02em;
-          line-height: 1;
-          margin-bottom: 6px;
-        }
-        .stat-label {
-          font-size: 0.82rem;
-          font-weight: 600;
-          letter-spacing: 0.07em;
-          text-transform: uppercase;
-          color: rgba(255,255,255,0.35);
-        }
-
-        /* ── GRADIENT SEPARATOR ─────────────────────── */
-        .gradient-sep {
-          width: 100%;
-          height: 1px;
-          background: linear-gradient(to right, transparent, rgba(197,168,128,0.2), transparent);
+        /* ── MOBILE RESPONSIVENESS ── */
+        @media (max-width: 768px) {
+          .premium-title {
+            font-size: clamp(2.5rem, 12vw, 4rem);
+            margin-bottom: 16px;
+          }
+          .premium-meta {
+            flex-wrap: wrap;
+            gap: 12px;
+            font-size: 0.85rem;
+          }
+          .premium-synopsis {
+            font-size: 0.95rem;
+            margin-bottom: 32px;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+          }
+          .premium-actions {
+            flex-direction: column;
+            width: 100%;
+            gap: 12px;
+          }
+          .btn-premium {
+            width: 100%;
+          }
+          .section-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 16px;
+            margin-bottom: 32px;
+          }
+          .premium-poster {
+            width: clamp(180px, 65vw, 280px);
+          }
+          .experience-section {
+            padding: 60px 0;
+          }
+          .exp-grid {
+            margin-top: 40px;
+            grid-template-columns: 1fr;
+          }
+          .exp-card {
+            padding: 30px 20px;
+          }
         }
       `}} />
 
-      <div style={{ backgroundColor: 'var(--bg-void)', minHeight: '100vh', overflowX: 'hidden' }}>
+      <div className="bg-void min-h-screen">
         <Header />
 
         <main>
-          {/* ══════════ HERO ══════════ */}
-          {hero && (
-            <section className="hero-section">
-              {/* Background */}
-              <div className="hero-bg">
-                <img src={hero.poster_url} alt={hero.title} />
-                <div className="hero-gradient-left" />
-                <div className="hero-gradient-bottom" />
-              </div>
+          <HeroCarousel movies={heroMovies} />
 
-              {/* Content */}
-              <div className="hero-content">
-                <div className="container">
-                  <p className="hero-eyebrow animate-fade-up">
-                    Dhrub Cineplex · Featured Tonight
-                  </p>
-
-                  <h1 className="hero-title animate-fade-up-delay-1">
-                    {hero.title}
-                  </h1>
-
-                  <div className="hero-meta animate-fade-up-delay-2">
-                    <span className="hero-meta-item hero-meta-cert">★ {hero.certification}</span>
-                    <span className="hero-meta-item">{hero.genre}</span>
-                    <span className="hero-meta-item">{hero.duration_minutes} min</span>
-                    <span className="hero-meta-item">{hero.language}</span>
-                  </div>
-
-                  <p className="hero-synopsis animate-fade-up-delay-3">
-                    {hero.synopsis}
-                  </p>
-
-                  <div className="hero-ctas animate-fade-up-delay-4">
-                    <Link href={`/movies/${hero.id}`} className="btn-hero-primary">
-                      🎟 Book Tickets Now
-                    </Link>
-                    <Link href={`/movies/${hero.id}`} className="btn-hero-ghost">
-                      ▶ Watch Trailer
-                    </Link>
-                  </div>
-                </div>
-              </div>
-
-              {/* Scroll nudge */}
-              <div className="scroll-indicator">
-                <div className="scroll-mouse" />
-                <span>Scroll</span>
-              </div>
-            </section>
-          )}
-
-          {/* ══════════ NOW PLAYING RAIL ══════════ */}
           <section className="rail-section">
             <div className="container">
-              <div className="rail-header">
+              <div className="section-header">
                 <div>
-                  <h2 className="rail-title">Now Playing</h2>
-                  <p className="rail-subtitle">Running shows at Bagaha's finest screen</p>
+                  <span className="section-subtitle">Now Showing</span>
+                  <h2 className="section-title">Curated For You</h2>
                 </div>
-                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#D4AF37', opacity: 0.8, letterSpacing: '0.02em' }}>
-                  View All →
-                </span>
+                <Link href="/movies" className="view-all">
+                  Explore Collection →
+                </Link>
               </div>
 
-              <div className="rail-track">
-                {movies.map((movie) => (
-                  <Link
-                    key={movie.id}
-                    href={`/movies/${movie.id}`}
-                    className="pc-wrap"
-                  >
-                    <div className="pc-frame">
-                      <img src={movie.poster_url} alt={movie.title} />
-                      <div className="pc-veil">
-                        <div className="pc-veil-play">▶</div>
-                        <span className="pc-veil-label">Book Tickets</span>
-                      </div>
-                    </div>
-                    <div className="pc-info">
-                      <p className="pc-title">{movie.title}</p>
-                      <div className="pc-tags">
-                        <span className="pc-cert">{movie.certification}</span>
-                        <span>·</span>
-                        <span>{movie.genre.split(',')[0].trim()}</span>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
+              <MovieCarousel movies={movies} />
             </div>
           </section>
 
-          {/* ══════════ STATS ══════════ */}
-          <section className="stats-section">
-            <div className="container">
-              <div className="stats-grid">
-                {[
-                  { n: '2', label: 'Premium Screens' },
-                  { n: '4+', label: 'Daily Shows' },
-                  { n: '280', label: 'Seats Available' },
-                  { n: '∞', label: 'Memories Made' },
-                ].map(s => (
-                  <div key={s.label} className="stat-item">
-                    <div className="stat-number">{s.n}</div>
-                    <div className="stat-label">{s.label}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          {/* ══════════ EXPERIENCE SECTION ══════════ */}
-          <section className="exp-section">
-            <div className="exp-bg-orb-1" />
-            <div className="exp-bg-orb-2" />
+          <section className="experience-section">
+            <div className="ambient-orb orb-gold" style={{ top: '10%', right: '0', left: 'auto' }} />
             <div className="container" style={{ position: 'relative', zIndex: 1 }}>
-              <div className="exp-header">
-                <p className="exp-tagline">The Dhrub Standard</p>
-                <h2 className="exp-title">
-                  Where every visit feels like <em>opening night</em>.
-                </h2>
+              <div className="section-header" style={{ justifyContent: 'center', textAlign: 'center', padding: 0 }}>
+                <div>
+                  <span className="section-subtitle">The Dhrub Standard</span>
+                  <h2 className="section-title">An Unrivalled Cinematic Journey</h2>
+                </div>
               </div>
+
               <div className="exp-grid">
                 {[
-                  { icon: '🎬', title: 'IMAX with Laser', body: 'Industry-leading projection technology delivering 60% brighter images, deepest contrast, and unmatched clarity for a fully immersive experience.' },
-                  { icon: '💺', title: 'Gold Class Recliners', body: 'Handcrafted motorised leather recliners with extended footrests, personal consoles, and in-seat dining service on request.' },
-                  { icon: '🔊', title: 'Dolby Atmos Sound', body: '64-channel three-dimensional audio that places every sound in its precise position around and above you — total immersion.' },
-                  { icon: '🍿', title: 'Artisan Concessions', body: 'Chef-crafted menus, freshly brewed beverages, and signature popcorn blends curated to complement each film.' },
-                ].map(f => (
-                  <div key={f.title} className="exp-card">
-                    <span className="exp-icon">{f.icon}</span>
-                    <h3 className="exp-card-title">{f.title}</h3>
-                    <p className="exp-card-body">{f.body}</p>
+                  { icon: '✦', title: 'Dolby Atmos Integration', desc: 'Immerse yourself in multi-dimensional sound with our state-of-the-art Dolby Atmos audio systems, bringing every scene to life.' },
+                  { icon: '⟡', title: 'First-Class Recliners', desc: 'Experience movies in unparalleled comfort with our plush, fully-motorized leather reclining seats and expansive legroom.' },
+                  { icon: '✺', title: 'Laser Projection', desc: 'Witness crystal-clear imagery, deeper contrasts, and vibrant colors with our next-generation laser projection technology.' },
+                  { icon: '✧', title: 'Artisan Culinary', desc: 'Elevate your experience with chef-curated gourmet snacks, premium beverages, and in-seat dining service.' }
+                ].map((item, i) => (
+                  <div key={i} className="exp-card">
+                    <div className="exp-icon">{item.icon}</div>
+                    <h3 className="exp-title">{item.title}</h3>
+                    <p className="exp-desc">{item.desc}</p>
                   </div>
                 ))}
               </div>
             </div>
           </section>
 
-          <div className="gradient-sep" />
         </main>
-
         <Footer />
       </div>
     </>

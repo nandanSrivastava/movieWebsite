@@ -6,67 +6,71 @@
 :root {
 
   /* ── COLOUR PALETTE ─────────────────────────────────── */
-  /* Backgrounds: deep matte obsidian & warm slate */
-  --bg-void:       #060608;
-  --bg-primary:    #0B0B0E;
-  --bg-secondary:  #121217;
-  --bg-elevated:   #181820;
-  --bg-card:       #131318;
-  --bg-card-hover: #1C1C24;
+  /* Backgrounds: Deep space / Obsidian to make the bright orange pop */
+  --bg-void:       #030305;
+  --bg-primary:    #08080C;
+  --bg-secondary:  #0F0F16;
+  --bg-elevated:   #15151E;
+  --bg-card:       #0C0C12;
+  --bg-card-hover: #161620;
   --bg-surface:    rgba(255,255,255,0.02);
-  --bg-glass:      rgba(255,255,255,0.04);
-  --bg-tertiary:   #1E1E26;
+  --bg-glass:      rgba(15, 15, 22, 0.5);
+  --bg-tertiary:   #1C1C28;
 
-  /* Champagne Gold Hierarchy — luxurious & satin metallic */
-  --gold-100: #FAF6EE;
-  --gold-200: #F3EAD3;
-  --gold-400: #E4C389;
-  --gold-500: #C5A880;   /* Primary brand champagne gold */
-  --gold-600: #A38760;
-  --gold-glow: rgba(197,168,128,0.15);
-  --gold-glow-strong: rgba(197,168,128,0.30);
+  /* Brand Amber (Maps to --gold-500 for compatibility) 
+     Based on logo: #faa000, #fac828 */
+  --gold-100: #FFF6E5;
+  --gold-200: #FFEDB2;
+  --gold-300: #FFD97F;
+  --gold-400: #FFC24C;
+  --gold-500: #FAA000;   /* Brand Amber from Logo */
+  --gold-600: #D68500;
+  --gold-glow: rgba(250, 160, 0, 0.25);
+  --gold-glow-strong: rgba(250, 160, 0, 0.5);
 
   /* Legacy aliases */
   --highlight-gold:       var(--gold-500);
   --highlight-gold-hover: var(--gold-400);
   --highlight-gold-glow:  var(--gold-glow);
 
-  /* Velvet Crimson (Burgundy) accent (CTAs, warnings) */
-  --crimson:       #962828;
-  --crimson-hover: #B23B3B;
-  --crimson-glow:  rgba(150,40,40,0.20);
+  /* Brand Fiery Orange (Maps to --crimson for compatibility) 
+     Based on logo: #f06e00, #f08200 */
+  --crimson:       #F06E00; /* Vibrant Orange */
+  --crimson-hover: #FF851A;
+  --crimson-glow:  rgba(240, 110, 0, 0.35);
   --accent-crimson:       var(--crimson);
   --accent-crimson-hover: var(--crimson-hover);
   --accent-crimson-glow:  var(--crimson-glow);
 
-  /* Text hierarchy (Zinc/Neutral warm tones) */
-  --text-primary:   #F3F3F5;
-  --text-secondary: #A1A1AA;
-  --text-muted:     #71717A;
-  --text-disabled:  #3F3F46;
+  /* Text hierarchy (Crisp whites & muted golds) */
+  --text-primary:   #F8F9FA;
+  --text-secondary: #B4B9C8;
+  --text-muted:     #788099;
+  --text-disabled:  #42485E;
 
   /* Borders */
-  --border-subtle:  rgba(255,255,255,0.04);
-  --border-default: rgba(255,255,255,0.07);
-  --border-strong:  rgba(255,255,255,0.12);
-  --border-gold:    rgba(197,168,128,0.20);
+  --border-subtle:  rgba(255, 255, 255, 0.05);
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-strong:  rgba(255, 255, 255, 0.15);
+  --border-gold:    rgba(212, 175, 55, 0.3);
+  --border-crimson: rgba(139, 30, 40, 0.4);
 
   /* Seat Status */
-  --seat-available:        #15151C;
-  --seat-available-border: #2A2A35;
-  --seat-locked:           #5C3317;
-  --seat-locked-border:    #8C5023;
+  --seat-available:        #121626;
+  --seat-available-border: #232A40;
+  --seat-locked:           #4A2311;
+  --seat-locked-border:    #73361A;
   --seat-booked:           #241214;
   --seat-booked-border:    #381A1D;
   --seat-selected:         var(--gold-500);
   --seat-selected-border:  var(--gold-400);
 
-  --category-normal:   #A1A1AA;
+  --category-normal:   #B4B9C8;
   --category-premium:  #60A5FA;
   --category-recliner: var(--gold-500);
 
   /* ── TYPOGRAPHY ─────────────────────────────────────── */
-  --font-display: 'Playfair Display', 'Georgia', serif;
+  --font-display: 'Cinzel', 'Playfair Display', serif;
   --font-heading: 'Outfit', 'Inter', sans-serif;
   --font-body:    'Inter', system-ui, sans-serif;
   --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
@@ -76,14 +80,14 @@
   --font-family-heading: var(--font-heading);
 
   /* ── SPACING & LAYOUT ───────────────────────────────── */
-  --max-width:    1360px;
-  --header-height: 72px;
+  --max-width:    1440px;
+  --header-height: 80px;
 
   --radius-xs:   4px;
   --radius-sm:   8px;
   --radius-md:   12px;
   --radius-lg:   20px;
-  --radius-xl:   28px;
+  --radius-xl:   32px;
   --radius-full: 9999px;
 
   /* Legacy */
@@ -93,19 +97,19 @@
   --border-radius-full: var(--radius-full);
 
   /* ── SHADOWS & GLOWS ────────────────────────────────── */
-  --shadow-sm:  0 1px 3px rgba(0,0,0,0.5);
-  --shadow-md:  0 4px 16px rgba(0,0,0,0.6);
-  --shadow-lg:  0 12px 40px rgba(0,0,0,0.7);
-  --shadow-xl:  0 25px 60px rgba(0,0,0,0.85);
-  --glow-gold:   0 0 20px var(--gold-glow), 0 0 50px rgba(197,168,128,0.08);
-  --glow-crimson: 0 0 20px var(--crimson-glow);
+  --shadow-sm:  0 2px 4px rgba(0,0,0,0.4);
+  --shadow-md:  0 8px 24px rgba(0,0,0,0.5);
+  --shadow-lg:  0 16px 48px rgba(0,0,0,0.6);
+  --shadow-xl:  0 30px 80px rgba(0,0,0,0.8);
+  --glow-gold:   0 0 25px var(--gold-glow), 0 0 60px rgba(212, 175, 55, 0.1);
+  --glow-crimson: 0 0 25px var(--crimson-glow);
 
   /* ── TRANSITIONS ────────────────────────────────────── */
-  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out-circ: cubic-bezier(0.85, 0, 0.15, 1);
-  --t-fast:   0.15s var(--ease-out-quart);
-  --t-normal: 0.28s var(--ease-out-quart);
-  --t-slow:   0.45s var(--ease-out-quart);
+  --t-fast:   0.2s var(--ease-out-expo);
+  --t-normal: 0.4s var(--ease-out-expo);
+  --t-slow:   0.7s var(--ease-out-expo);
 
   /* Legacy */
   --transition-fast:   var(--t-fast);

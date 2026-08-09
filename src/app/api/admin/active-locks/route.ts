@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     const shows = await db.getShows();
     const activeLocks = [];
 
-    for (const show of shows) {
+    const showSeatsPromises = shows.map(async (show) => {
       const seats = await db.getSeatsForShow(show.id);
       
       const lockedSeats = seats.filter((s) => {
@@ -58,8 +58,9 @@ export async function GET(req: NextRequest) {
         );
       });
 
+      const showLocks = [];
       for (const seat of lockedSeats) {
-        activeLocks.push({
+        showLocks.push({
           showId: show.id,
           movieTitle: show.movie?.title || 'Unknown Movie',
           screenName: show.screen?.name || 'Standard Screen',
@@ -71,6 +72,12 @@ export async function GET(req: NextRequest) {
           expiresAt: seat.lock_expires_at
         });
       }
+      return showLocks;
+    });
+
+    const results = await Promise.all(showSeatsPromises);
+    for (const locks of results) {
+      activeLocks.push(...locks);
     }
 
     const response = NextResponse.json({ activeLocks });
