@@ -4,6 +4,19 @@ import React, { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useToast } from '@/features/shared/context/ToastContext';
+import { z } from 'zod';
+
+const loginSchema = z.object({
+  email: z.string().trim().email("Invalid email format").max(255, "Email is too long"),
+  password: z.string().min(1, "Please fill in all required fields.").max(255, "Password is too long")
+    .refine(val => !/[<>]/.test(val), { message: "Invalid characters in password" }),
+});
+
+const signUpSchema = loginSchema.extend({
+  fullName: z.string().trim().min(1, "Please provide your name").max(100, "Name is too long")
+    .refine(val => !/[<>]/.test(val), { message: "Invalid characters in name" }),
+  phone: z.string().trim().min(1, "Please provide your phone number").max(20, "Phone number is too long"),
+});
 
 export default function LoginPage() {
   return (
@@ -60,12 +73,26 @@ function LoginContent() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
+    
+    if (!email.trim() || !password.trim()) {
       showToast('Please fill in all required fields.', 'error');
       return;
     }
     if (isSignUp && (!fullName || !phone)) {
       showToast('Please provide your name and phone number to sign up.', 'error');
+      return;
+    }
+
+    // Advanced Zod validation against attacks
+    let validationResult;
+    if (isSignUp) {
+      validationResult = signUpSchema.safeParse({ email, password, fullName, phone });
+    } else {
+      validationResult = loginSchema.safeParse({ email, password });
+    }
+
+    if (!validationResult.success) {
+      showToast(validationResult.error.issues[0]?.message || 'Invalid input provided.', 'error');
       return;
     }
 
@@ -150,7 +177,7 @@ function LoginContent() {
           </p>
         </div>
 
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           {isSignUp && (
             <>
               <div className="form-group">
