@@ -249,7 +249,7 @@ export default function Header() {
           {/* Brand */}
           <Link href="/" className="hdr-logo">
             <div className="hdr-logo-mark">
-              <Image src="/logo.jpeg" alt="Dhrub Cineplex" width={38} height={38} priority />
+              <Image src="/logo.jpeg" alt="Dhrub Cineplex" width={38} height={38} priority loading="eager" />
             </div>
             <div className="hdr-logo-text">
               <span className="hdr-logo-name">Dhrub <span>Cineplex</span></span>
