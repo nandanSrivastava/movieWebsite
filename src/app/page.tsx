@@ -15,12 +15,21 @@ export default async function Home() {
   } catch (err) {
     console.error('[Home] Failed to load movies from DB:', err);
   }
-  const featuredMovies = movies.filter(m => m.is_featured);
+  // Fallback to title matching if is_featured column is missing in the database
+  const featuredMovies = movies.filter(m => m.is_featured || ['Bahubali', 'Pathaan', 'Jawan', 'Animal'].includes(m.title));
   const heroMovies = featuredMovies.length > 0 ? featuredMovies : [movies[0]].filter(Boolean);
+
+  const upcomingMovies = [
+    { title: 'Kalki 2898 AD', date: 'May 2026', poster: 'https://image.tmdb.org/t/p/w500/mXxsJd0F9x3GgP0r3sQOSt71vJv.jpg' },
+    { title: 'Fighter', date: 'August 2026', poster: 'https://image.tmdb.org/t/p/w500/z6OAmJ2XvX7LdKq1K9Pz0iR1m1B.jpg' },
+    { title: 'Pushpa 2: The Rule', date: 'December 2026', poster: 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=500&auto=format&fit=crop' },
+    { title: 'Singham Again', date: 'November 2026', poster: 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?q=80&w=500&auto=format&fit=crop' },
+  ];
 
   return (
     <>
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style dangerouslySetInnerHTML={{
+        __html: `
         /* Custom Styles for Premium Home Page */
         .premium-hero {
           position: relative;
@@ -46,7 +55,7 @@ export default async function Home() {
           object-position: center 30%;
           filter: brightness(0.65) contrast(1.1) saturate(1.2);
           transform: scale(1.05);
-          animation: cinematicPan 20s ease-in-out infinite alternate;
+          animation: cinematicPan 30s ease-in-out infinite alternate;
         }
 
         @keyframes cinematicPan {
@@ -179,10 +188,10 @@ export default async function Home() {
           border-radius: 4px;
           font-family: var(--font-heading);
           font-weight: 600;
-          font-size: 1rem;
-          letter-spacing: 0.1em;
+          font-size: 0.95rem;
+          letter-spacing: 0.15em;
           text-transform: uppercase;
-          transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+          transition: all 0.5s var(--ease-snappy);
           text-decoration: none;
           position: relative;
           overflow: hidden;
@@ -209,7 +218,7 @@ export default async function Home() {
 
         .btn-book:hover {
           background: var(--gold-400);
-          transform: translateY(-2px);
+          transform: translateY(-2px) scale(1.02);
           box-shadow: 0 8px 30px rgba(212, 175, 55, 0.4);
         }
 
@@ -223,7 +232,7 @@ export default async function Home() {
         .btn-trailer:hover {
           background: rgba(255, 255, 255, 0.1);
           border-color: rgba(255, 255, 255, 0.4);
-          transform: translateY(-2px);
+          transform: translateY(-2px) scale(1.02);
         }
 
         /* Ambient Orbs */
@@ -340,7 +349,7 @@ export default async function Home() {
           width: 100%;
           height: 100%;
           object-fit: cover;
-          transition: transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+          transition: transform 0.8s var(--ease-out-expo);
         }
 
         .premium-poster:hover .poster-image-wrap {
@@ -379,7 +388,7 @@ export default async function Home() {
           letter-spacing: 0.05em;
           transform: translateY(20px);
           opacity: 0;
-          transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.1s;
+          transition: all 0.5s var(--ease-spring) 0.1s;
         }
 
         .premium-poster:hover .book-now-badge {
@@ -447,7 +456,7 @@ export default async function Home() {
           background: var(--bg-card);
           border-radius: 8px;
           border: 1px solid rgba(255,255,255,0.03);
-          transition: all 0.4s ease;
+          transition: all 0.5s var(--ease-out-expo);
           position: relative;
           overflow: hidden;
         }
@@ -459,7 +468,7 @@ export default async function Home() {
           background: linear-gradient(90deg, var(--gold-500), var(--crimson));
           transform: scaleX(0);
           transform-origin: left;
-          transition: transform 0.5s ease;
+          transition: transform 0.6s var(--ease-snappy);
         }
 
         .exp-card:hover {
@@ -540,6 +549,213 @@ export default async function Home() {
           .exp-card {
             padding: 30px 20px;
           }
+          .culinary-content, .location-container {
+            grid-template-columns: 1fr;
+            gap: 40px;
+          }
+          .map-wrapper {
+            height: 350px;
+          }
+        }
+
+        /* Upcoming Section */
+        .upcoming-section {
+          padding: 80px 0;
+          background: linear-gradient(to bottom, var(--bg-void), var(--bg-primary));
+        }
+        
+        .upcoming-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+          gap: 32px;
+          max-width: var(--max-width);
+          margin: 0 auto;
+          padding: 0 20px;
+        }
+
+        .upcoming-card {
+          position: relative;
+          border-radius: 8px;
+          overflow: hidden;
+          aspect-ratio: 2/3;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+          transition: transform 0.4s var(--ease-snappy);
+        }
+
+        .upcoming-card:hover {
+          transform: translateY(-8px);
+          box-shadow: 0 20px 40px rgba(0,0,0,0.8), 0 0 30px rgba(212, 175, 55, 0.1);
+          border: 1px solid rgba(212, 175, 55, 0.3);
+        }
+
+        .upcoming-card img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          filter: brightness(0.85);
+          transition: transform 0.8s ease;
+        }
+        
+        .upcoming-card:hover img {
+          transform: scale(1.05);
+        }
+
+        .upcoming-info {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          width: 100%;
+          padding: 24px;
+          background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+        }
+
+        .upcoming-date {
+          color: var(--gold-500);
+          font-family: var(--font-heading);
+          font-size: 0.8rem;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          margin-bottom: 4px;
+          display: block;
+        }
+
+        .upcoming-title {
+          color: white;
+          font-family: var(--font-display);
+          font-size: 1.25rem;
+          font-weight: 600;
+        }
+
+        /* Culinary Section */
+        .culinary-section {
+          padding: 120px 0;
+          background: var(--bg-primary);
+          position: relative;
+          overflow: hidden;
+          border-top: 1px solid rgba(255,255,255,0.02);
+        }
+
+        .culinary-content {
+          max-width: var(--max-width);
+          margin: 0 auto;
+          padding: 0 20px;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 64px;
+          align-items: center;
+        }
+
+        .culinary-text h2 {
+          font-family: var(--font-display);
+          font-size: clamp(2.5rem, 4vw, 3.5rem);
+          color: #fff;
+          margin-bottom: 24px;
+          line-height: 1.1;
+        }
+
+        .culinary-text p {
+          color: rgba(255,255,255,0.7);
+          font-family: var(--font-body);
+          font-size: 1.1rem;
+          line-height: 1.8;
+          margin-bottom: 40px;
+        }
+
+        .culinary-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 24px;
+        }
+
+        .culinary-item {
+          position: relative;
+          border-radius: 12px;
+          overflow: hidden;
+          aspect-ratio: 4/5;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .culinary-item img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          transition: transform 0.8s ease;
+        }
+
+        .culinary-item:hover img {
+          transform: scale(1.08);
+        }
+
+        .culinary-item-overlay {
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 60%);
+          display: flex;
+          align-items: flex-end;
+          padding: 24px;
+        }
+
+        .culinary-item-title {
+          color: #fff;
+          font-family: var(--font-heading);
+          font-size: 1.1rem;
+          font-weight: 500;
+          letter-spacing: 0.05em;
+        }
+
+        /* Location Section */
+        .location-section {
+          padding: 120px 0;
+          background: var(--bg-void);
+          border-top: 1px solid rgba(255,255,255,0.05);
+        }
+
+        .location-container {
+          max-width: var(--max-width);
+          margin: 0 auto;
+          padding: 0 20px;
+          display: grid;
+          grid-template-columns: 350px 1fr;
+          gap: 40px;
+        }
+
+        .location-info h2 {
+          font-family: var(--font-display);
+          font-size: 2.5rem;
+          color: #fff;
+          margin-bottom: 24px;
+        }
+
+        .location-details {
+          color: rgba(255,255,255,0.7);
+          font-family: var(--font-body);
+          line-height: 1.8;
+        }
+
+        .location-details strong {
+          color: var(--gold-500);
+          display: block;
+          margin-top: 24px;
+          margin-bottom: 8px;
+          font-family: var(--font-heading);
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          font-size: 0.9rem;
+        }
+
+        .map-wrapper {
+          border-radius: 12px;
+          overflow: hidden;
+          height: 450px;
+          border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .map-wrapper iframe {
+          width: 100%;
+          height: 100%;
+          border: 0;
+          /* Magic dark mode filter for Google Maps */
+          filter: invert(90%) hue-rotate(180deg) brightness(85%) contrast(120%);
         }
       `}} />
 
@@ -565,6 +781,28 @@ export default async function Home() {
             </div>
           </section>
 
+          <section className="upcoming-section">
+            <div className="container">
+              <div className="section-header">
+                <div>
+                  <span className="section-subtitle">Coming Soon</span>
+                  <h2 className="section-title">Anticipated Premieres</h2>
+                </div>
+              </div>
+              <div className="upcoming-grid">
+                {upcomingMovies.map((movie, i) => (
+                  <div key={i} className="upcoming-card">
+                    <img src={movie.poster} alt={movie.title} loading="lazy" />
+                    <div className="upcoming-info">
+                      <span className="upcoming-date">{movie.date}</span>
+                      <h3 className="upcoming-title">{movie.title}</h3>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
           <section className="experience-section">
             <div className="ambient-orb orb-gold" style={{ top: '10%', right: '0', left: 'auto' }} />
             <div className="container" style={{ position: 'relative', zIndex: 1 }}>
@@ -580,7 +818,7 @@ export default async function Home() {
                   { icon: '✦', title: 'Dolby Atmos Integration', desc: 'Immerse yourself in multi-dimensional sound with our state-of-the-art Dolby Atmos audio systems, bringing every scene to life.' },
                   { icon: '⟡', title: 'First-Class Recliners', desc: 'Experience movies in unparalleled comfort with our plush, fully-motorized leather reclining seats and expansive legroom.' },
                   { icon: '✺', title: 'Laser Projection', desc: 'Witness crystal-clear imagery, deeper contrasts, and vibrant colors with our next-generation laser projection technology.' },
-                  { icon: '✧', title: 'Artisan Culinary', desc: 'Elevate your experience with chef-curated gourmet snacks, premium beverages, and in-seat dining service.' }
+                  { icon: '✧', title: 'Exclusive Ambiance', desc: 'Step into a world of luxury before the movie even begins, with our elegantly designed foyers and VIP lounges.' }
                 ].map((item, i) => (
                   <div key={i} className="exp-card">
                     <div className="exp-icon">{item.icon}</div>
@@ -588,6 +826,57 @@ export default async function Home() {
                     <p className="exp-desc">{item.desc}</p>
                   </div>
                 ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="culinary-section">
+            <div className="culinary-content">
+              <div className="culinary-text">
+                <span className="section-subtitle">In-Seat Dining</span>
+                <h2>The Culinary<br />Experience</h2>
+                <p>Elevate your moviegoing with our chef-curated menu. From artisanal gourmet popcorn to handcrafted beverages and savory delights, our seamless in-seat service ensures you never miss a moment of the action.</p>
+                <Link href="/menu" className="btn-premium btn-trailer">View Menu</Link>
+              </div>
+              <div className="culinary-grid">
+                <div className="culinary-item" style={{ transform: 'translateY(40px)' }}>
+                  <img src="https://images.unsplash.com/photo-1585647347384-2593bc35786b?q=80&w=600&auto=format&fit=crop" alt="Gourmet Popcorn" loading="lazy" />
+                  <div className="culinary-item-overlay"><span className="culinary-item-title">Gourmet Popcorn</span></div>
+                </div>
+                <div className="culinary-item">
+                  <img src="https://images.unsplash.com/photo-1536935338788-846bb9981813?q=80&w=600&auto=format&fit=crop" alt="Handcrafted Beverages" loading="lazy" />
+                  <div className="culinary-item-overlay"><span className="culinary-item-title">Handcrafted Beverages</span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="location-section">
+            <div className="location-container">
+              <div className="location-info">
+                <h2>Visit Us</h2>
+                <div className="location-details">
+                  <strong>Location</strong>
+                  Dhrub Cineplex, Sukhban,<br />
+                  Bagaha, Bihar 845105<br />
+                  India
+
+                  <strong>Valet Parking</strong>
+                  Complimentary valet parking available for VIP and Gold Class ticket holders via the South Gate entrance.
+
+                  <strong>Contact</strong>
+                  concierge@dhrubcineplex.in <br />
+                  +91 99340 60014
+                </div>
+              </div>
+              <div className="map-wrapper">
+                <iframe
+                  src="https://maps.google.com/maps?q=27.1401051,84.0555802&hl=en&z=15&output=embed"
+                  allowFullScreen={false}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  title="Dhrub Cineplex Location"
+                ></iframe>
               </div>
             </div>
           </section>

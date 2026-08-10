@@ -406,7 +406,7 @@ export default function AdminDashboardPage() {
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Poster URL</label>
                   <input
                     type="url"
-                    placeholder="https://images.unsplash.com/photo-..."
+                    placeholder="https://upload.wikimedia.org/wikipedia/en/..."
                     value={moviePoster}
                     onChange={(e) => setMovieField('moviePoster', e.target.value)}
                     style={{

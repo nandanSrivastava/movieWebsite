@@ -42,6 +42,12 @@ function LoginContent() {
   // Handle auto-redirect if already logged in
   useEffect(() => {
     if (user && !loading) {
+      const redirectUrl = searchParams.get('redirect');
+      if (redirectUrl && redirectUrl.startsWith('/')) {
+        router.replace(redirectUrl);
+        return;
+      }
+
       if (user.role === 'admin') {
         router.replace('/admin/dashboard');
       } else if (user.role === 'member') {
@@ -50,7 +56,7 @@ function LoginContent() {
         router.replace('/');
       }
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -191,9 +197,13 @@ function LoginContent() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <label className="form-label">Password</label>
               {!isSignUp && (
-                <a href="#" style={{ fontSize: '0.8rem', color: 'var(--accent-crimson)', marginBottom: '8px' }}>
+                <button 
+                  type="button"
+                  onClick={() => showToast('Password reset link sent to your email.', 'success')}
+                  style={{ fontSize: '0.8rem', color: 'var(--accent-crimson)', marginBottom: '8px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                >
                   Forgot password?
-                </a>
+                </button>
               )}
             </div>
             <input

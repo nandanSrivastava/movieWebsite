@@ -36,29 +36,34 @@ export default function Header() {
           height: 72px;
           display: flex;
           align-items: center;
-          transition: all 0.4s cubic-bezier(0.25, 1, 0.5, 1);
-          border-radius: 99px;
-          background: rgba(10, 16, 36, 0.95);
-          border: 1px solid rgba(255,255,255,0.08);
-          box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+          transition: transform 0.5s var(--ease-smooth), background-color 0.4s var(--ease-out-expo), border-color 0.4s var(--ease-out-expo), box-shadow 0.4s var(--ease-out-expo);
+          border-radius: 24px;
+          background: rgba(10, 16, 36, 0.65);
+          backdrop-filter: blur(16px) saturate(180%);
+          -webkit-backdrop-filter: blur(16px) saturate(180%);
+          border: 1px solid rgba(255,255,255,0.06);
+          box-shadow: 0 4px 30px rgba(0,0,0,0.3);
         }
         @media (max-width: 768px) {
           .site-header {
             top: 12px;
             width: calc(100% - 24px);
-            border-radius: 20px;
+            border-radius: 16px;
           }
         }
         .site-header.scrolled {
-          background: rgba(5, 8, 20, 0.95);
-          border-color: rgba(255, 255, 255, 0.15);
-          box-shadow: 0 15px 50px rgba(0,0,0,0.6), 0 0 30px rgba(0, 162, 255, 0.1);
-          top: 16px;
+          background: rgba(5, 8, 20, 0.85);
+          border-color: rgba(255, 255, 255, 0.1);
+          box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+          transform: translateX(-50%) translateY(-12px);
+          width: calc(100% - 24px);
         }
         .site-header.top {
-          background: rgba(10, 16, 36, 0.2);
-          border-color: rgba(255, 255, 255, 0.05);
+          background: transparent;
+          border-color: transparent;
           box-shadow: none;
+          backdrop-filter: none;
+          -webkit-backdrop-filter: none;
         }
 
         .hdr-inner {
@@ -161,77 +166,79 @@ export default function Header() {
         .hdr-actions {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 16px;
         }
         .hdr-user-pill {
           display: flex;
           align-items: center;
-          gap: 10px;
-          padding: 6px 6px 6px 14px;
-          background: rgba(255,255,255,0.04);
+          gap: 12px;
+          padding: 6px 8px 6px 16px;
+          background: rgba(255,255,255,0.03);
           border: 1px solid rgba(255,255,255,0.08);
-          border-radius: 99px;
-          transition: border-color 0.2s ease;
+          border-radius: 100px;
+          transition: all 0.3s var(--ease-out-expo);
         }
         .hdr-user-pill:hover {
-          border-color: rgba(255,255,255,0.16);
+          background: rgba(255,255,255,0.06);
+          border-color: rgba(255,255,255,0.12);
         }
         .hdr-role-badge {
-          font-size: 0.72rem;
-          font-weight: 700;
-          letter-spacing: 0.07em;
-          text-transform: uppercase;
-          padding: 3px 10px;
-          border-radius: 99px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          letter-spacing: 0.05em;
+          text-transform: capitalize;
+          padding: 4px 12px;
+          border-radius: 100px;
         }
         .hdr-role-admin {
-          background: rgba(16,185,129,0.12);
-          color: #34D399;
-          border: 1px solid rgba(16,185,129,0.2);
+          background: rgba(212, 175, 55, 0.15);
+          color: var(--gold-400);
+          border: 1px solid rgba(212, 175, 55, 0.3);
         }
         .hdr-role-member {
-          background: rgba(0, 162, 255, 0.12);
-          color: var(--blue-500);
-          border: 1px solid rgba(0, 162, 255, 0.2);
+          background: rgba(96, 165, 250, 0.15);
+          color: #93C5FD;
+          border: 1px solid rgba(96, 165, 250, 0.3);
         }
         .hdr-role-user {
-          background: rgba(96,165,250,0.12);
-          color: #60A5FA;
-          border: 1px solid rgba(96,165,250,0.2);
+          background: rgba(255, 255, 255, 0.1);
+          color: rgba(255,255,255,0.8);
+          border: 1px solid rgba(255,255,255,0.15);
         }
         .hdr-signout {
-          padding: 5px 14px;
-          border-radius: 99px;
-          background: rgba(255,255,255,0.06);
-          border: none;
-          color: rgba(255,255,255,0.6);
-          font-size: 0.83rem;
-          font-weight: 600;
+          padding: 6px 16px;
+          border-radius: 100px;
+          background: transparent;
+          border: 1px solid transparent;
+          color: rgba(255,255,255,0.7);
+          font-size: 0.85rem;
+          font-weight: 500;
           cursor: pointer;
-          transition: all 0.2s ease;
+          transition: all 0.3s var(--ease-snappy);
         }
         .hdr-signout:hover {
-          background: rgba(255,255,255,0.12);
+          background: rgba(255,255,255,0.08);
+          border-color: rgba(255,255,255,0.15);
           color: #fff;
         }
         .hdr-signin {
           display: inline-flex;
           align-items: center;
-          gap: 7px;
-          padding: 5px 15px;
-          border-radius: 99px;
-          background: rgba(255,255,255,0.06);
-          border: 1px solid rgba(255,255,255,0.25);
-          color: rgba(255,255,255,0.85);
-          font-size: 0.83rem;
+          gap: 8px;
+          padding: 8px 20px;
+          border-radius: 100px;
+          background: var(--gold-500);
+          color: #000;
+          font-size: 0.85rem;
           font-weight: 600;
           text-decoration: none;
-          transition: all 0.2s ease;
+          transition: all 0.3s var(--ease-spring);
+          box-shadow: 0 4px 15px rgba(212, 175, 55, 0.2);
         }
         .hdr-signin:hover {
-          background: rgba(255,255,255,0.12);
-          border-color: rgba(255,255,255,0.55);
-          color: #fff;
+          background: var(--gold-400);
+          transform: translateY(-2px);
+          box-shadow: 0 6px 20px rgba(212, 175, 55, 0.4);
         }
       `}} />
 
@@ -251,9 +258,6 @@ export default function Header() {
 
           {/* Nav — centred */}
           <nav className="hdr-nav">
-            <Link href="/" className={`hdr-nav-link ${isActive('/') ? 'active' : ''}`}>
-              Movies
-            </Link>
             {user?.role === 'admin' && (
               <Link href="/admin/dashboard" className={`hdr-nav-link ${isActive('/admin/dashboard') ? 'active' : ''}`}>
                 Command Center

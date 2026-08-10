@@ -26,12 +26,12 @@ export default function HeroCarousel({ movies }: { movies: any[] }) {
         return (
           <div
             key={`bg-${hero.id}`}
-            style={{
+              style={{
               position: 'absolute',
               inset: 0,
               opacity: isActive ? 1 : 0,
               visibility: isActive ? 'visible' : 'hidden',
-              transition: 'opacity 1s ease-in-out',
+              transition: 'opacity 1.2s var(--ease-smooth)',
               zIndex: 0
             }}
           >
@@ -55,9 +55,9 @@ export default function HeroCarousel({ movies }: { movies: any[] }) {
                 position: isActive ? 'relative' : 'absolute',
                 top: 0,
                 opacity: isActive ? 1 : 0,
-                transform: isActive ? 'rotateY(0deg)' : 'rotateY(90deg)',
-                transformOrigin: 'left center',
-                transition: 'opacity 0.8s ease-in-out, transform 0.8s ease-in-out',
+                transform: isActive ? 'scale(1) translateY(0)' : 'scale(0.95) translateY(20px)',
+                transformOrigin: 'center center',
+                transition: 'opacity 0.8s var(--ease-out-expo), transform 0.8s var(--ease-snappy)',
                 pointerEvents: isActive ? 'auto' : 'none'
               }}
             >
@@ -105,12 +105,12 @@ export default function HeroCarousel({ movies }: { movies: any[] }) {
               onClick={() => setCurrentIndex(i)}
               style={{
                 width: i === currentIndex ? '32px' : '10px',
-                height: '10px',
+                height: i === currentIndex ? '10px' : '8px',
                 borderRadius: '5px',
-                background: i === currentIndex ? 'var(--gold-500)' : 'rgba(255,255,255,0.3)',
+                background: i === currentIndex ? 'var(--gold-500)' : 'rgba(255,255,255,0.2)',
                 border: 'none',
                 cursor: 'pointer',
-                transition: 'all 0.3s ease'
+                transition: 'all 0.5s var(--ease-spring)'
               }}
               aria-label={`Go to slide ${i + 1}`}
             />

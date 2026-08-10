@@ -217,9 +217,9 @@ export default function Footer() {
               <span>Made with ♥ in Bagaha.</span>
             </p>
             <div className="footer-legal">
-              <a href="#">Privacy Policy</a>
-              <a href="#">Terms of Use</a>
-              <a href="#">Refund Policy</a>
+              <Link href="/privacy">Privacy Policy</Link>
+              <Link href="/terms">Terms of Use</Link>
+              <Link href="/refund">Refund Policy</Link>
             </div>
           </div>
         </div>
