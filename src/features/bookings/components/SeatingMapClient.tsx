@@ -6,6 +6,7 @@ import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { ShowType, SeatStatusType } from '@/lib/db';
 import { isMockMode } from '@/lib/config';
+import { supabase as supabaseClient } from '@/lib/supabaseClient';
 import { createClient } from '@supabase/supabase-js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -171,10 +172,20 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
 
     setSubmitting(true);
     try {
+      // Get Supabase token if in live mode
+      let token = '';
+      if (!isMockMode) {
+        const { data } = await supabaseClient.auth.getSession();
+        token = data.session?.access_token || '';
+      }
+
       // 1. Lock seats via API
       const lockRes = await fetch('/api/seats/lock', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
           showId: show.id,
           seatLayoutIds: Array.from(selectedSeats)

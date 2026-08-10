@@ -21,8 +21,8 @@ export default async function Home() {
   const heroMovies = featuredMovies.length > 0 ? featuredMovies : [movies[0]].filter(Boolean);
 
   const upcomingMovies = [
-    { title: 'Kalki 2898 AD', date: 'May 2026', poster: 'https://image.tmdb.org/t/p/w500/mXxsJd0F9x3GgP0r3sQOSt71vJv.jpg' },
-    { title: 'Fighter', date: 'August 2026', poster: 'https://image.tmdb.org/t/p/w500/z6OAmJ2XvX7LdKq1K9Pz0iR1m1B.jpg' },
+    { title: 'Kalki 2898 AD', date: 'May 2026', poster: 'https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=500&auto=format&fit=crop' },
+    { title: 'Fighter', date: 'August 2026', poster: 'https://images.unsplash.com/photo-1440404653325-ab127d49abc1?q=80&w=500&auto=format&fit=crop' },
     { title: 'Pushpa 2: The Rule', date: 'December 2026', poster: 'https://images.unsplash.com/photo-1626814026160-2237a95fc5a0?q=80&w=500&auto=format&fit=crop' },
     { title: 'Singham Again', date: 'November 2026', poster: 'https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?q=80&w=500&auto=format&fit=crop' },
   ];
