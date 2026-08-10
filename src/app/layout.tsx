@@ -5,12 +5,36 @@ import { ToastProvider } from "@/features/shared/context/ToastContext";
 import { AuthProvider } from "@/features/auth/context/AuthContext";
 import MockAuthSwitcher from "@/features/auth/components/MockAuthSwitcher";
 import { QueryProvider } from "@/features/shared/components/QueryProvider";
+import { Cinzel, Inter, Outfit, Playfair_Display } from "next/font/google";
+
+const cinzel = Cinzel({ 
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800", "900"],
+  variable: "--font-cinzel",
+});
+
+const inter = Inter({ 
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700"],
+  variable: "--font-inter",
+});
+
+const outfit = Outfit({ 
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800", "900"],
+  variable: "--font-outfit",
+});
+
+const playfair = Playfair_Display({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800", "900"],
+  variable: "--font-playfair",
+});
 
 export const viewport: Viewport = {
   themeColor: "#05060A",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
 };
 
 export const metadata: Metadata = {
@@ -66,11 +90,8 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark scroll-smooth">
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
       </head>
-      <body className="antialiased min-h-screen bg-void text-primary selection:bg-gold-500/30 selection:text-gold-200">
+      <body className={`antialiased min-h-screen bg-void text-primary selection:bg-gold-500/30 selection:text-gold-200 ${cinzel.variable} ${inter.variable} ${outfit.variable} ${playfair.variable}`}>
         <ErrorBoundary>
           <QueryProvider>
             <ToastProvider>

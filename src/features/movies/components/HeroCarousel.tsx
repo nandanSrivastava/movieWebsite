@@ -98,22 +98,34 @@ export default function HeroCarousel({ movies }: { movies: any[] }) {
       </div>
 
       {movies.length > 1 && (
-        <div style={{ position: 'absolute', bottom: '40px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', gap: '12px' }}>
+        <div style={{ position: 'absolute', bottom: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', gap: '8px' }}>
           {movies.map((_, i) => (
             <button
               key={i}
               onClick={() => setCurrentIndex(i)}
               style={{
-                width: i === currentIndex ? '32px' : '10px',
-                height: i === currentIndex ? '10px' : '8px',
-                borderRadius: '5px',
-                background: i === currentIndex ? 'var(--gold-500)' : 'rgba(255,255,255,0.2)',
+                width: '48px',
+                height: '48px',
+                background: 'transparent',
                 border: 'none',
                 cursor: 'pointer',
-                transition: 'all 0.5s var(--ease-spring)'
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 0
               }}
               aria-label={`Go to slide ${i + 1}`}
-            />
+            >
+              <div
+                style={{
+                  width: i === currentIndex ? '32px' : '10px',
+                  height: '8px',
+                  borderRadius: '4px',
+                  background: i === currentIndex ? 'var(--gold-500)' : 'rgba(255,255,255,0.4)',
+                  transition: 'all 0.5s var(--ease-spring)'
+                }}
+              />
+            </button>
           ))}
         </div>
       )}

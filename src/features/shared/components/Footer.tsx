@@ -35,7 +35,7 @@ export default function Footer() {
           }
         }
         .footer-brand-name {
-          font-family: 'Playfair Display', serif;
+          font-family: var(--font-playfair);
           font-size: 1.5rem;
           font-weight: 700;
           color: #fff;
@@ -55,7 +55,7 @@ export default function Footer() {
         .footer-desc {
           font-size: 0.9rem;
           line-height: 1.75;
-          color: rgba(255,255,255,0.35);
+          color: rgba(255,255,255,0.7);
           max-width: 320px;
           margin-bottom: 28px;
         }
@@ -64,8 +64,8 @@ export default function Footer() {
           gap: 10px;
         }
         .footer-social-link {
-          width: 36px;
-          height: 36px;
+          width: 48px;
+          height: 48px;
           border-radius: 50%;
           background: rgba(255,255,255,0.05);
           border: 1px solid rgba(255,255,255,0.08);
@@ -82,12 +82,12 @@ export default function Footer() {
           transform: translateY(-2px);
         }
         .footer-col-title {
-          font-family: 'Outfit', sans-serif;
+          font-family: var(--font-heading);
           font-size: 0.75rem;
           font-weight: 700;
           letter-spacing: 0.12em;
           text-transform: uppercase;
-          color: rgba(255,255,255,0.35);
+          color: rgba(255,255,255,0.7);
           margin-bottom: 20px;
         }
         .footer-links {
@@ -97,7 +97,7 @@ export default function Footer() {
         }
         .footer-link {
           font-size: 0.9rem;
-          color: rgba(255,255,255,0.55);
+          color: rgba(255,255,255,0.7);
           text-decoration: none;
           transition: color 0.2s ease;
           display: flex;
@@ -121,7 +121,7 @@ export default function Footer() {
         }
         .footer-copy {
           font-size: 0.8rem;
-          color: rgba(255,255,255,0.25);
+          color: rgba(255,255,255,0.6);
         }
         .footer-copy span { color: rgba(255, 184, 0, 0.8); }
         .footer-legal {
@@ -130,7 +130,7 @@ export default function Footer() {
         }
         .footer-legal a {
           font-size: 0.8rem;
-          color: rgba(255,255,255,0.25);
+          color: rgba(255,255,255,0.6);
           text-decoration: none;
           transition: color 0.2s ease;
         }
@@ -166,7 +166,7 @@ export default function Footer() {
 
             {/* Contact Column */}
             <div>
-              <h4 className="footer-col-title">Visit Us</h4>
+              <h3 className="footer-col-title">Visit Us</h3>
               <div className="footer-links">
                 <span className="footer-link">
                   <span className="link-icon">📍</span>
@@ -193,7 +193,7 @@ export default function Footer() {
 
             {/* Partners Column */}
             <div>
-              <h4 className="footer-col-title">Complex Partners</h4>
+              <h3 className="footer-col-title">Complex Partners</h3>
               <div className="footer-links">
                 {[
                   { icon: '🍽️', name: 'Garden Café & Restaurant' },

@@ -105,7 +105,7 @@ export default function Header() {
           line-height: 1;
         }
         .hdr-logo-name {
-          font-family: 'Playfair Display', serif;
+          font-family: var(--font-playfair);
           font-size: 1.25rem;
           font-weight: 700;
           color: #fff;
@@ -119,7 +119,7 @@ export default function Header() {
           font-weight: 600;
           letter-spacing: 0.18em;
           text-transform: uppercase;
-          color: rgba(255,255,255,0.35);
+          color: rgba(255,255,255,0.7);
           margin-top: 1px;
         }
 

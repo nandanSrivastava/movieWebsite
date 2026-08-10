@@ -70,9 +70,10 @@
   --category-recliner: var(--gold-500);
 
   /* ── TYPOGRAPHY ─────────────────────────────────────── */
-  --font-display: 'Cinzel', 'Playfair Display', serif;
-  --font-heading: 'Outfit', 'Inter', sans-serif;
-  --font-body:    'Inter', system-ui, sans-serif;
+  --font-display: var(--font-cinzel), 'Cinzel', 'Playfair Display', serif;
+  --font-heading: var(--font-outfit), 'Outfit', 'Inter', sans-serif;
+  --font-body:    var(--font-inter), 'Inter', system-ui, sans-serif;
+  --font-playfair: var(--font-playfair), 'Playfair Display', serif;
   --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
 
   /* Legacy aliases */
