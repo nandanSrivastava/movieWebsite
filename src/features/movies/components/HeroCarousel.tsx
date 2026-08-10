@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function HeroCarousel({ movies }: { movies: any[] }) {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -36,7 +37,7 @@ export default function HeroCarousel({ movies }: { movies: any[] }) {
             }}
           >
             <div className="premium-hero-bg">
-              <img src={hero.poster_url} alt={hero.title} />
+              <Image src={hero.poster_url} alt={hero.title} fill priority={index === 0} style={{ objectFit: 'cover' }} />
             </div>
             <div className="premium-vignette" />
             <div className="premium-gradient" />

@@ -2,6 +2,7 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function MovieCarousel({ movies }: { movies: any[] }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -72,7 +73,7 @@ export default function MovieCarousel({ movies }: { movies: any[] }) {
         {movies.map((movie) => (
           <Link key={movie.id} href={`/movies/${movie.id}`} className="premium-poster">
             <div className="poster-image-wrap">
-              <img src={movie.poster_url} alt={movie.title} loading="lazy" />
+              <Image src={movie.poster_url} alt={movie.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
               <div className="poster-overlay">
                 <span className="book-now-badge">Book Tickets</span>
               </div>

@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function Footer() {
   return (
@@ -143,7 +144,7 @@ export default function Footer() {
             {/* Brand Column */}
             <div>
               <div className="footer-brand-name">
-                <img src="/logo.jpeg" alt="Dhrub Cineplex" />
+                <Image src="/logo.jpeg" alt="Dhrub Cineplex" width={32} height={32} />
                 Dhrub <span>Cineplex</span>
               </div>
               <p className="footer-desc">

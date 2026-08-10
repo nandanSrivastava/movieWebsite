@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { db } from '@/lib/db';
 import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
@@ -121,14 +122,22 @@ export default async function Home() {
           height: 6px;
           background-color: var(--crimson);
           border-radius: 50%;
-          box-shadow: 0 0 10px var(--crimson);
+          position: relative;
+        }
+
+        .hero-badge-dot::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background-color: var(--crimson);
+          border-radius: 50%;
           animation: pulseCrimson 2s infinite;
         }
 
         @keyframes pulseCrimson {
-          0% { box-shadow: 0 0 0 0 rgba(139, 30, 40, 0.7); }
-          70% { box-shadow: 0 0 0 10px rgba(139, 30, 40, 0); }
-          100% { box-shadow: 0 0 0 0 rgba(139, 30, 40, 0); }
+          0% { transform: scale(1); opacity: 0.7; }
+          70% { transform: scale(3.5); opacity: 0; }
+          100% { transform: scale(1); opacity: 0; }
         }
 
         .premium-title {
@@ -792,7 +801,7 @@ export default async function Home() {
               <div className="upcoming-grid">
                 {upcomingMovies.map((movie, i) => (
                   <div key={i} className="upcoming-card">
-                    <img src={movie.poster} alt={movie.title} loading="lazy" />
+                    <Image src={movie.poster} alt={movie.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
                     <div className="upcoming-info">
                       <span className="upcoming-date">{movie.date}</span>
                       <h3 className="upcoming-title">{movie.title}</h3>
@@ -840,11 +849,11 @@ export default async function Home() {
               </div>
               <div className="culinary-grid">
                 <div className="culinary-item" style={{ transform: 'translateY(40px)' }}>
-                  <img src="https://images.unsplash.com/photo-1585647347384-2593bc35786b?q=80&w=600&auto=format&fit=crop" alt="Gourmet Popcorn" loading="lazy" />
+                  <Image src="https://images.unsplash.com/photo-1585647347384-2593bc35786b?q=80&w=600&auto=format&fit=crop" alt="Gourmet Popcorn" fill sizes="(max-width: 768px) 100vw, 50vw" style={{ objectFit: 'cover' }} />
                   <div className="culinary-item-overlay"><span className="culinary-item-title">Gourmet Popcorn</span></div>
                 </div>
                 <div className="culinary-item">
-                  <img src="https://images.unsplash.com/photo-1536935338788-846bb9981813?q=80&w=600&auto=format&fit=crop" alt="Handcrafted Beverages" loading="lazy" />
+                  <Image src="https://images.unsplash.com/photo-1536935338788-846bb9981813?q=80&w=600&auto=format&fit=crop" alt="Handcrafted Beverages" fill sizes="(max-width: 768px) 100vw, 50vw" style={{ objectFit: 'cover' }} />
                   <div className="culinary-item-overlay"><span className="culinary-item-title">Handcrafted Beverages</span></div>
                 </div>
               </div>

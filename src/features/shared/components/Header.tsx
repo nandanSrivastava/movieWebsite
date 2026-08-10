@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 
@@ -248,7 +249,7 @@ export default function Header() {
           {/* Brand */}
           <Link href="/" className="hdr-logo">
             <div className="hdr-logo-mark">
-              <img src="/logo.jpeg" alt="Dhrub Cineplex" />
+              <Image src="/logo.jpeg" alt="Dhrub Cineplex" width={38} height={38} />
             </div>
             <div className="hdr-logo-text">
               <span className="hdr-logo-name">Dhrub <span>Cineplex</span></span>
