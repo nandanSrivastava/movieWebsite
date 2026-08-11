@@ -5,6 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { z } from 'zod';
+import { isMockMode } from '@/lib/db';
+import { createClient } from '@supabase/supabase-js';
 
 const loginSchema = z.object({
   email: z.string().trim().email("Invalid email format").max(255, "Email is too long"),
@@ -35,8 +37,6 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const { user, signIn, signUp, loading } = useCineBookAuth();
   const { showToast } = useToast();
-
-  console.log('[LoginPage] Render state:', { user, loading });
 
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
@@ -226,7 +226,23 @@ function LoginContent() {
               {!isSignUp && (
                 <button 
                   type="button"
-                  onClick={() => showToast('Password reset link sent to your email.', 'success')}
+                  onClick={async () => {
+                    if (!email) {
+                      showToast('Please enter your email to reset password.', 'info');
+                      return;
+                    }
+                    if (!isMockMode) {
+                      try {
+                        const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+                        await supabase.auth.resetPasswordForEmail(email);
+                        showToast('Password reset link sent to your email.', 'success');
+                      } catch {
+                        showToast('Failed to send reset link.', 'error');
+                      }
+                    } else {
+                      showToast('Password reset mocked in dev mode.', 'success');
+                    }
+                  }}
                   style={{ fontSize: '0.8rem', color: 'var(--accent-crimson)', marginBottom: '8px', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                 >
                   Forgot password?
@@ -276,17 +292,19 @@ function LoginContent() {
         </div>
 
         {/* Quick Dev Tips if in mock mode */}
-        <div style={{
-          marginTop: '32px',
-          padding: '12px',
-          borderRadius: '8px',
-          backgroundColor: 'rgba(255, 255, 255, 0.02)',
-          border: '1px dashed var(--border-default)',
-          fontSize: '0.8rem',
-          color: 'var(--text-muted)'
-        }}>
-          <strong style={{ color: 'var(--text-secondary)' }}>Dev Tip:</strong> In Mock Mode, log in with <code style={{ color: 'var(--highlight-gold)' }}>admin@cinebook.com</code> or <code style={{ color: 'var(--highlight-gold)' }}>member@cinebook.com</code> to simulate roles instantly.
-        </div>
+        {isMockMode && (
+          <div style={{
+            marginTop: '32px',
+            padding: '12px',
+            borderRadius: '8px',
+            backgroundColor: 'rgba(255, 255, 255, 0.02)',
+            border: '1px dashed var(--border-default)',
+            fontSize: '0.8rem',
+            color: 'var(--text-muted)'
+          }}>
+            <strong style={{ color: 'var(--text-secondary)' }}>Dev Tip:</strong> In Mock Mode, log in with <code style={{ color: 'var(--highlight-gold)' }}>admin@cinebook.com</code> or <code style={{ color: 'var(--highlight-gold)' }}>member@cinebook.com</code> to simulate roles instantly.
+          </div>
+        )}
       </div>
     </div>
   );
