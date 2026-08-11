@@ -12,6 +12,10 @@ export async function POST(req: NextRequest) {
     const isMockTrigger = req.headers.get('x-mock-payment') === 'true' && process.env.NODE_ENV !== 'production' && isMockMode;
     const isRazorpayConfigured = !!process.env.RAZORPAY_WEBHOOK_SECRET;
 
+    if (process.env.NODE_ENV === 'production' && !isRazorpayConfigured) {
+      return NextResponse.json({ error: 'Razorpay webhook secret not configured in production' }, { status: 503 });
+    }
+
     let eventId = '';
     let orderId = '';
     let paymentId = '';

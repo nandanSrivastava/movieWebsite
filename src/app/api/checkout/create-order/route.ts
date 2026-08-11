@@ -95,6 +95,10 @@ export async function POST(req: NextRequest) {
 
     const isRazorpayConfigured = !!process.env.RAZORPAY_KEY_ID && !!process.env.RAZORPAY_KEY_SECRET;
 
+    if (process.env.NODE_ENV === 'production' && !isRazorpayConfigured) {
+      return NextResponse.json({ error: 'Razorpay keys not configured in production' }, { status: 503 });
+    }
+
     if (isMockMode || !isRazorpayConfigured) {
       // ── MOCK CHECKOUT SETUP ─────────────────────────────────
       return NextResponse.json({
