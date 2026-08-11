@@ -1,0 +1,191 @@
+
+> dhrub-talkies@0.1.0 lint
+> eslint
+
+
+/home/nandan/Dhrub_talkies/scripts/split-db.js
+  1:12  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/home/nandan/Dhrub_talkies/scripts/test-concurrency.js
+  10:14  error    A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  25:18  warning  'e' is defined but never used            @typescript-eslint/no-unused-vars
+
+/home/nandan/Dhrub_talkies/src/app/account/bookings/page.tsx
+  50:90  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+
+/home/nandan/Dhrub_talkies/src/app/admin/dashboard/page.tsx
+   65:37  warning  'error' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+   82:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/nandan/Dhrub_talkies/src/app/admin/dashboard/page.tsx:82:5
+  80 |   useEffect(() => {
+  81 |     if (authLoading) return;
+> 82 |     setInitialized(true);
+     |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  83 |     if (!user || user.role !== 'admin') {
+  84 |       router.replace('/login?error=unauthorized');
+  85 |     }  react-hooks/set-state-in-effect
+  119:9   warning  'formatTimeLabel' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      @typescript-eslint/no-unused-vars
+
+/home/nandan/Dhrub_talkies/src/app/api/screens/route.ts
+  4:27  warning  'req' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/nandan/Dhrub_talkies/src/app/api/shows/route.ts
+  45:27  warning  'req' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/nandan/Dhrub_talkies/src/app/booking/[showId]/page.tsx
+  106:17  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+/home/nandan/Dhrub_talkies/src/app/booking/checkout/page.tsx
+  61:7  error  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/nandan/Dhrub_talkies/src/app/booking/checkout/page.tsx:61:7
+  59 |   useEffect(() => {
+  60 |     if (user) {
+> 61 |       setCustomerName(user.full_name || '');
+     |       ^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  62 |       setCustomerPhone(user.phone || '');
+  63 |     }
+  64 |   }, [user]);  react-hooks/set-state-in-effect
+
+/home/nandan/Dhrub_talkies/src/app/movies/[id]/page.tsx
+   77:15  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  134:19  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+/home/nandan/Dhrub_talkies/src/app/movies/page.tsx
+  169:21  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+/home/nandan/Dhrub_talkies/src/features/admin/components/AdminTables.tsx
+  59:97  error  Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/home/nandan/Dhrub_talkies/src/features/admin/components/AdminTables.tsx:59:97
+  57 |               <tbody>
+  58 |                 {activeLocks.map((lock: any) => {
+> 59 |                   const timeLeft = Math.max(0, Math.round((new Date(lock.expiresAt).getTime() - Date.now()) / 1000));
+     |                                                                                                 ^^^^^^^^^^ Cannot call impure function
+  60 |                   const mins = Math.floor(timeLeft / 60);
+  61 |                   const secs = timeLeft % 60;
+  62 |                   return (  react-hooks/purity
+
+/home/nandan/Dhrub_talkies/src/features/auth/context/AuthContext.tsx
+  111:5   error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/nandan/Dhrub_talkies/src/features/auth/context/AuthContext.tsx:111:5
+  109 |
+  110 |   useEffect(() => {
+> 111 |     refreshSession();
+      |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  112 |
+  113 |     if (!isMockMode && supabase) {
+  114 |       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event) => {  react-hooks/set-state-in-effect
+  133:13  warning  'phone' is never reassigned. Use 'const' instead                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      prefer-const
+
+/home/nandan/Dhrub_talkies/src/features/bookings/components/BookingConfirmationClient.tsx
+   5:8  warning  'Header' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+   6:8  warning  'Footer' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+  45:7  error    Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/home/nandan/Dhrub_talkies/src/features/bookings/components/BookingConfirmationClient.tsx:45:7
+  43 |   useEffect(() => {
+  44 |     if (status !== 'pending' && !hasNotified) {
+> 45 |       setHasNotified(true);
+     |       ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  46 |       if (status === 'paid') {
+  47 |         showToast('Ticket confirmed successfully!', 'success');
+  48 |       } else if (status === 'failed' || status === 'refunded') {  react-hooks/set-state-in-effect
+
+/home/nandan/Dhrub_talkies/src/features/bookings/components/DigitalTicketStub.tsx
+  43:11  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+  98:13  warning  Using `<img>` could result in slower LCP and higher bandwidth. Consider using `<Image />` from `next/image` or a custom image loader to automatically optimize images. This may incur additional usage or cost from your provider. See: https://nextjs.org/docs/messages/no-img-element  @next/next/no-img-element
+
+/home/nandan/Dhrub_talkies/src/features/bookings/components/SeatingGrid.tsx
+  30:11  error  Error: Cannot reassign variable after render completes
+
+Reassigning `lastCategory` after render has completed can cause inconsistent behavior on subsequent renders. Consider using state instead.
+
+/home/nandan/Dhrub_talkies/src/features/bookings/components/SeatingGrid.tsx:30:11
+  28 |           const rowCategory = rowSeats[0]?.seat_layout?.category || 'normal';
+  29 |           const renderCategoryHeader = rowCategory !== lastCategory;
+> 30 |           lastCategory = rowCategory;
+     |           ^^^^^^^^^^^^ Cannot reassign `lastCategory` after render completes
+  31 |
+  32 |           return (
+  33 |             <React.Fragment key={row}>  react-hooks/immutability
+
+/home/nandan/Dhrub_talkies/src/features/bookings/components/SeatingMapClient.tsx
+   36:39  warning  'refetch' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+   82:6   warning  React Hook useEffect has a missing dependency: 'queryClient'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react-hooks/exhaustive-deps
+   90:13  error    Error: Cannot access variable before it is declared
+
+`handleHoldExpiry` is accessed before it is declared, which prevents the earlier access from updating when this value changes over time.
+
+/home/nandan/Dhrub_talkies/src/features/bookings/components/SeatingMapClient.tsx:90:13
+  88 |         setTimer((prev) => {
+  89 |           if (prev <= 1) {
+> 90 |             handleHoldExpiry();
+     |             ^^^^^^^^^^^^^^^^ `handleHoldExpiry` accessed before it is declared
+  91 |             return 0;
+  92 |           }
+  93 |           return prev - 1;
+
+/home/nandan/Dhrub_talkies/src/features/bookings/components/SeatingMapClient.tsx:106:3
+  104 |
+  105 |   // Handle countdown expiry - releases holds automatically
+> 106 |   const handleHoldExpiry = async () => {
+      |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 107 |     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 108 |     setIsLocked(false);
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 128 |     queryClient.invalidateQueries({ queryKey: ['seats', show.id] });
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 129 |   };
+      | ^^^^^ `handleHoldExpiry` is declared here
+  130 |
+  131 |   // ── 3. SEAT SELECTION CLICK HANDLERS ─────────────────────────
+  132 |   const handleSeatClick = (seat: SeatStatusType) => {  react-hooks/immutability
+  103:6   warning  React Hook useEffect has a missing dependency: 'handleHoldExpiry'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                react-hooks/exhaustive-deps
+  223:9   warning  'formatTimer' is assigned a value but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   @typescript-eslint/no-unused-vars
+
+/home/nandan/Dhrub_talkies/src/features/shared/context/ToastContext.tsx
+  57:15  warning  'textColor' is never reassigned. Use 'const' instead  prefer-const
+
+/home/nandan/Dhrub_talkies/src/lib/mockDb.ts
+  277:17  warning  'key' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+/home/nandan/Dhrub_talkies/src/lib/rateLimit.ts
+  1:10  warning  'NextResponse' is defined but never used  @typescript-eslint/no-unused-vars
+
+/home/nandan/Dhrub_talkies/src/lib/supabaseDb.ts
+  2:25  warning  'SeatLayout' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 32 problems (10 errors, 22 warnings)
+  0 errors and 2 warnings potentially fixable with the `--fix` option.
+
