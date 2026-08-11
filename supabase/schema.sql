@@ -232,9 +232,11 @@ BEGIN
         AND seat_layout_id = ANY(p_seat_layout_ids)
       FOR UPDATE NOWAIT
     LOOP
-      -- Check each row is still available
+      -- Check each row is still available (or lock has expired)
       IF (SELECT status FROM public.seat_status WHERE id = v_row.id) != 'available' THEN
-        RETURN FALSE;
+        IF NOT ((SELECT status FROM public.seat_status WHERE id = v_row.id) = 'locked' AND (SELECT lock_expires_at FROM public.seat_status WHERE id = v_row.id) < NOW()) THEN
+          RETURN FALSE;
+        END IF;
       END IF;
     END LOOP;
   EXCEPTION
@@ -330,6 +332,10 @@ BEGIN
   RETURN v_count;
 END;
 $$;
+
+-- Enable pg_cron for sweep_expired_locks
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+SELECT cron.schedule('sweep-expired-locks', '* * * * *', 'SELECT public.sweep_expired_locks();');
 
 -- ============================================================
 -- ROW LEVEL SECURITY (RLS)
