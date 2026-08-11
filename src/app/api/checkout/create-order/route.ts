@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
       await db.finalizeBooking(booking.id, paymentId, qrToken);
 
       const ip = req.headers.get('x-forwarded-for') || 'unknown';
-      await db.logAudit(userId || 'cashier', 'BOOKING_CONFIRM_CASH_POS', { bookingId: booking.id, seatLayoutIds }, ip);
+      await db.logAudit(userId || 'cashier', 'BOOKING_CONFIRM_CASH_POS', { bookingId: booking.id, seatLayoutIds, amount: booking.total_amount }, ip);
 
       return NextResponse.json({
         isMock: false,

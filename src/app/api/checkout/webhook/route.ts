@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
     const rawBody = await req.text();
     
     // Check if client is executing in Mock Mode or if Razorpay is not configured
-    const isMockTrigger = req.headers.get('x-mock-payment') === 'true';
+    const isMockTrigger = req.headers.get('x-mock-payment') === 'true' && process.env.NODE_ENV !== 'production' && isMockMode;
     const isRazorpayConfigured = !!process.env.RAZORPAY_WEBHOOK_SECRET;
 
     let eventId = '';
@@ -117,8 +117,49 @@ export async function POST(req: NextRequest) {
       await db.logAudit(booking.booked_by, 'PAYMENT_CAPTURE_SUCCESS', { 
         bookingId: booking.id, 
         orderId, 
-        paymentId 
+        paymentId,
+        amount: booking.total_amount
       });
+
+      // Send email
+      if (process.env.SMTP_USER) {
+        try {
+          const { sendEmail } = await import('@/lib/mailer');
+          let customerEmail = 'customer@example.com';
+          if (isSupabaseConfigured && booking.booked_by) {
+            const supabase = createClient(
+              process.env.NEXT_PUBLIC_SUPABASE_URL!,
+              process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+            );
+            const { data: userData } = await supabase.auth.admin.getUserById(booking.booked_by);
+            if (userData?.user?.email) {
+              customerEmail = userData.user.email;
+            }
+          }
+
+          const seatsStr = booking.booking_seats?.map(bs => `${bs.seat_layout?.row_label || ''}-${bs.seat_layout?.seat_number || ''}`).join(', ') || 'N/A';
+          const emailHtml = `
+            <div style="font-family: sans-serif; padding: 20px;">
+              <h2>Ticket Confirmed!</h2>
+              <p>Hi ${booking.customer_name || 'Movie Buff'},</p>
+              <p>Your payment of ₹${booking.total_amount} is successful.</p>
+              <div style="background: #f4f4f4; padding: 15px; border-radius: 8px;">
+                <p><strong>Booking ID:</strong> ${booking.id}</p>
+                <p><strong>Seats:</strong> ${seatsStr}</p>
+                <p><strong>QR Token:</strong> ${qrToken}</p>
+              </div>
+              <p>Show this email at the entrance.</p>
+            </div>
+          `;
+          await sendEmail({
+            to: customerEmail,
+            subject: 'Dhrub Cineplex - Ticket Confirmation',
+            html: emailHtml
+          });
+        } catch (emailErr) {
+          console.error('Failed to send confirmation email:', emailErr);
+        }
+      }
 
       return NextResponse.json({ received: true, status: 'confirmed' });
     } else {
