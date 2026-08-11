@@ -1,3 +1,4 @@
+import 'server-only';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Movie, Screen, SeatLayout, Show, SeatStatus, Booking, Profile, AuditLog, DatabaseClient } from './types';
 

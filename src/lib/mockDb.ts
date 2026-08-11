@@ -1,3 +1,4 @@
+import 'server-only';
 import { Movie, Screen, SeatLayout, Show, SeatStatus, Booking, Profile, AuditLog, DatabaseClient } from './types';
 
 // ── IN-MEMORY MOCK DATABASE IMPLEMENTATION ─────────────────────

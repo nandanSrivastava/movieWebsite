@@ -1,3 +1,4 @@
+import 'server-only';
 import { DatabaseClient, Movie, Show, SeatStatus, Booking, Profile } from './types';
 import { MockDatabase } from './mockDb';
 import { SupabaseDatabaseClient } from './supabaseDb';

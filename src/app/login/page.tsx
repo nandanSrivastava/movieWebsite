@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { z } from 'zod';
-import { isMockMode } from '@/lib/db';
+import { isMockMode } from '@/lib/config';
 import { createClient } from '@supabase/supabase-js';
 
 const loginSchema = z.object({

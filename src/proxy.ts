@@ -65,13 +65,44 @@ export async function proxy(req: NextRequest) {
       }
     } else {
       // ── LIVE MODE SECURITY GUARD ──────────────────────────────
-      // Checks for the existence of Supabase project auth cookies.
-      const cookies = req.cookies.getAll();
-      const hasSbCookie = cookies.some(c => c.name.startsWith('sb-'));
-      
-      if (!hasSbCookie) {
+      const res = NextResponse.next();
+      const { createServerClient } = await import('@supabase/ssr');
+      const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          cookies: {
+            getAll() {
+              return req.cookies.getAll();
+            },
+            setAll(cookiesToSet) {
+              cookiesToSet.forEach(({ name, value, options }) => req.cookies.set(name, value));
+              cookiesToSet.forEach(({ name, value, options }) =>
+                res.cookies.set(name, value, options)
+              );
+            },
+          },
+        }
+      );
+
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
         return NextResponse.redirect(new URL('/login', req.url));
       }
+
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+      const role = profile?.role || 'user';
+
+      if (path.startsWith('/admin') && role !== 'admin') {
+        return NextResponse.redirect(new URL('/login?error=unauthorized', req.url));
+      }
+      
+      if (path.startsWith('/counter') && !['admin', 'member'].includes(role)) {
+        return NextResponse.redirect(new URL('/login?error=unauthorized', req.url));
+      }
+
+      return res;
     }
   }
 
