@@ -9,6 +9,9 @@ import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { ShowType, SeatStatusType } from '@/lib/db';
 import { useQuery } from '@tanstack/react-query';
+import BookingSummaryCard from '@/features/bookings/components/BookingSummaryCard';
+import CheckoutForm from '@/features/bookings/components/CheckoutForm';
+import MockGatewayModal from '@/features/bookings/components/MockGatewayModal';
 
 // RFC-4122 Compliant UUID Generator
 function generateUUID() {
@@ -170,7 +173,7 @@ function CheckoutContent() {
       },
       handler: function (response: any) {
         showToast('Payment successful! Verifying tickets...', 'success');
-        router.replace(`/booking/confirmation/${order.bookingId}`);
+        router.replace(`/booking/confirmation/${order.bookingId}?paymentId=${response.razorpay_payment_id}`);
       },
       modal: {
         ondismiss: function () {
@@ -302,16 +305,37 @@ function CheckoutContent() {
 
         <div className="container" style={{ maxWidth: '960px', position: 'relative', zIndex: 1 }}>
           
-          <h2 style={{ 
-            fontSize: '2.2rem', 
-            fontWeight: 800, 
-            marginBottom: '36px', 
-            fontFamily: 'var(--font-family-heading)',
-            color: '#FFFFFF',
-            letterSpacing: '-1px'
-          }}>
-            Review & Finalize Order
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '36px' }}>
+            <h2 style={{ 
+              fontSize: '2.2rem', 
+              fontWeight: 800, 
+              fontFamily: 'var(--font-family-heading)',
+              color: '#FFFFFF',
+              letterSpacing: '-1px',
+              margin: 0
+            }}>
+              Review & Finalize Order
+            </h2>
+            <button
+              onClick={() => router.back()}
+              style={{
+                backgroundColor: 'transparent',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                color: '#FFFFFF',
+                padding: '8px 16px',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-family-base)',
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                transition: 'background-color 0.2s',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              ← Go Back
+            </button>
+          </div>
 
           <div style={{ 
             display: 'grid', 
@@ -320,287 +344,40 @@ function CheckoutContent() {
             alignItems: 'start'
           }}>
             
-            {/* Left Column: Glass Ticket Summary Card */}
             {show && (
-              <div style={{ 
-                background: 'linear-gradient(135deg, rgba(18, 18, 24, 0.7) 0%, rgba(11, 11, 14, 0.85) 100%)',
-                backdropFilter: 'blur(12px)',
-                border: '1px solid var(--border-subtle)',
-                padding: '32px',
-                borderRadius: '16px',
-                boxShadow: 'var(--shadow-lg)'
-              }}>
-                <span style={{ 
-                  fontSize: '0.75rem', 
-                  color: 'var(--highlight-gold)', 
-                  fontWeight: 800, 
-                  textTransform: 'uppercase',
-                  letterSpacing: '1.5px',
-                  backgroundColor: 'rgba(197, 168, 128, 0.1)',
-                  padding: '3px 8px',
-                  borderRadius: '4px'
-                }}>
-                  Booking Summary
-                </span>
-                
-                <h3 style={{ 
-                  fontSize: '1.7rem', 
-                  fontWeight: 800, 
-                  margin: '12px 0 20px 0', 
-                  fontFamily: 'var(--font-family-heading)',
-                  color: '#FFFFFF'
-                }}>
-                  {show.movie?.title}
-                </h3>
-                
-                <div style={{ 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  gap: '14px', 
-                  fontSize: '0.95rem', 
-                  color: '#E5E7EB',
-                  borderTop: '1px solid rgba(255,255,255,0.05)',
-                  paddingTop: '20px'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#9CA3AF' }}>🏛️ Screen:</span>
-                    <strong style={{ color: 'var(--highlight-gold)' }}>{show.screen?.name}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#9CA3AF' }}>📅 Date:</span>
-                    <strong>{new Date(show.show_date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#9CA3AF' }}>🕒 Time:</span>
-                    <strong>{show.show_time.substring(0, 5)}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#9CA3AF' }}>🎫 Selected Seats:</span>
-                    <strong style={{ color: 'var(--highlight-gold)' }}>{selectedSeatLabels.join(', ')}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: '#9CA3AF' }}>🎟️ Total Tickets:</span>
-                    <strong>{seatLayoutIds.length}</strong>
-                  </div>
-                </div>
-              </div>
+              <BookingSummaryCard 
+                show={show} 
+                selectedSeatLabels={selectedSeatLabels} 
+                seatCount={seatLayoutIds.length} 
+              />
             )}
 
-            {/* Right Column: Contact info & Payment Form */}
-            <div style={{ 
-              backgroundColor: 'var(--bg-card)', 
-              border: '1px solid var(--border-subtle)',
-              padding: '32px',
-              borderRadius: '16px',
-              boxShadow: 'var(--shadow-lg)'
-            }}>
-              <h4 style={{ 
-                fontSize: '1.25rem', 
-                fontWeight: 800, 
-                marginBottom: '24px', 
-                fontFamily: 'var(--font-family-heading)',
-                color: '#FFFFFF'
-              }}>
-                Contact Information
-              </h4>
-
-              <form onSubmit={handleCheckoutSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                {user && ['admin', 'member'].includes(user.role) && (
-                  <div className="form-group">
-                    <label className="form-label" style={{ color: 'var(--highlight-gold)', fontWeight: 700 }}>Payment Mode Override</label>
-                    <select
-                      className="form-control"
-                      value={paymentMethod}
-                      onChange={(e) => setPaymentMethod(e.target.value as 'online' | 'cash')}
-                      disabled={paying}
-                      style={{
-                        backgroundColor: 'var(--bg-secondary)',
-                        border: '1px solid var(--border-default)',
-                        color: '#FFFFFF',
-                        padding: '12px',
-                        borderRadius: '8px',
-                        fontSize: '0.95rem'
-                      }}
-                    >
-                      <option value="online">UPI / Card Payment (Razorpay)</option>
-                      <option value="cash">Counter Cash Sale (Counter Instant Confirmation)</option>
-                    </select>
-                  </div>
-                )}
-
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>Customer Name</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="Enter full name"
-                    value={customerName}
-                    onChange={(e) => setCustomerName(e.target.value)}
-                    required
-                    disabled={paying}
-                    style={{
-                      backgroundColor: 'rgba(255, 255, 255, 0.01)',
-                      border: '1px solid var(--border-subtle)',
-                      color: '#FFFFFF',
-                      padding: '12px 14px',
-                      borderRadius: '8px',
-                      fontSize: '0.95rem',
-                      width: '100%',
-                      outline: 'none',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>Phone Number</label>
-                  <input
-                    type="tel"
-                    className="form-control"
-                    placeholder="Enter 10-digit mobile number"
-                    value={customerPhone}
-                    onChange={(e) => setCustomerPhone(e.target.value)}
-                    required
-                    disabled={paying}
-                    style={{
-                      backgroundColor: 'rgba(255, 255, 255, 0.01)',
-                      border: '1px solid var(--border-subtle)',
-                      color: '#FFFFFF',
-                      padding: '12px 14px',
-                      borderRadius: '8px',
-                      fontSize: '0.95rem',
-                      width: '100%',
-                      outline: 'none',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                </div>
-
-                {/* Total amount bar */}
-                <div style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '20px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.01)',
-                  borderRadius: '12px',
-                  border: '1px solid var(--border-subtle)',
-                  margin: '10px 0'
-                }}>
-                  <span style={{ fontWeight: 600, color: '#9CA3AF' }}>Total Amount</span>
-                  <span style={{ fontSize: '1.9rem', fontWeight: 800, color: 'var(--highlight-gold)' }}>₹{totalAmount}</span>
-                </div>
-
-                <button
-                  type="submit"
-                  className="btn btn-gold"
-                  style={{ width: '100%', padding: '15px', fontSize: '1rem', borderRadius: '8px', fontWeight: 800 }}
-                  disabled={paying}
-                >
-                  {paying 
-                    ? 'Processing Order...' 
-                    : paymentMethod === 'cash' 
-                      ? `Confirm Cash Sale (₹${totalAmount})` 
-                      : `Proceed to Pay ₹${totalAmount}`}
-                </button>
-              </form>
-            </div>
+            <CheckoutForm
+              user={user}
+              paymentMethod={paymentMethod}
+              setPaymentMethod={setPaymentMethod}
+              customerName={customerName}
+              setCustomerName={setCustomerName}
+              customerPhone={customerPhone}
+              setCustomerPhone={setCustomerPhone}
+              totalAmount={totalAmount}
+              paying={paying}
+              handleCheckoutSubmit={handleCheckoutSubmit}
+            />
 
           </div>
 
-          {/* ── MOCK GATEWAY SIMULATED MODAL OVERLAY ──────────────── */}
           {showMockGateway && (
-            <div style={{
-              position: 'fixed',
-              top: 0, left: 0, width: '100%', height: '100%',
-              backgroundColor: 'rgba(0, 0, 0, 0.85)',
-              zIndex: 99999,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backdropFilter: 'blur(12px)',
-              padding: '20px'
-            }}>
-              <div style={{
-                maxWidth: '460px',
-                width: '100%',
-                padding: '36px',
-                backgroundColor: 'var(--bg-card)',
-                borderRadius: '16px',
-                border: '1px solid var(--border-gold)',
-                textAlign: 'center',
-                boxShadow: 'var(--shadow-xl), 0 0 30px var(--gold-glow)'
-              }}>
-                <div style={{
-                  width: '60px',
-                  height: '60px',
-                  borderRadius: '50%',
-                  backgroundColor: 'rgba(197, 168, 128, 0.1)',
-                  color: 'var(--highlight-gold)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '28px',
-                  margin: '0 auto 20px auto',
-                  fontWeight: 'bold'
-                }}>
-                  ₹
-                </div>
-
-                <h3 style={{ fontSize: '1.45rem', fontWeight: 800, marginBottom: '8px', color: '#FFFFFF', fontFamily: 'var(--font-family-heading)' }}>
-                  Simulated Razorpay Gateway
-                </h3>
-                <p style={{ color: '#9CA3AF', fontSize: '0.9rem', marginBottom: '24px', lineHeight: 1.5 }}>
-                  You are running in development Mock Mode. You can test success/failure payment scenarios instantly.
-                </p>
-
-                <div style={{
-                  padding: '16px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255, 255, 255, 0.05)',
-                  textAlign: 'left',
-                  fontSize: '0.85rem',
-                  color: '#E5E7EB',
-                  marginBottom: '32px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px'
-                }}>
-                  <p>💵 <strong>Amount:</strong> ₹{totalAmount}</p>
-                  <p>📦 <strong>Order ID:</strong> {mockBookingPayload?.razorpayOrderId}</p>
-                  <p>👤 <strong>Customer:</strong> {customerName}</p>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <button 
-                    onClick={handleSimulatePaymentSuccess}
-                    className="btn btn-gold"
-                    style={{ width: '100%', padding: '12px', fontSize: '0.95rem' }}
-                  >
-                    ✓ Simulate Payment Success
-                  </button>
-                  <button 
-                    onClick={handleSimulatePaymentFailure}
-                    className="btn btn-secondary"
-                    style={{ 
-                      width: '100%', 
-                      padding: '12px', 
-                      fontSize: '0.95rem',
-                      borderColor: 'rgba(150, 40, 40, 0.3)', 
-                      color: '#FF4D55',
-                      backgroundColor: 'rgba(150, 40, 40, 0.05)'
-                    }}
-                  >
-                    ✕ Simulate Payment Failure
-                  </button>
-                </div>
-              </div>
-            </div>
+            <MockGatewayModal
+              totalAmount={totalAmount}
+              mockBookingPayload={mockBookingPayload}
+              customerName={customerName}
+              handleSimulatePaymentSuccess={handleSimulatePaymentSuccess}
+              handleSimulatePaymentFailure={handleSimulatePaymentFailure}
+            />
           )}
 
-        </div>
-      </main>
+        </div>      </main>
       <Footer />
     </>
   );
