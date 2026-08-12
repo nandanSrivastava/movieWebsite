@@ -110,21 +110,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
     const body = await req.json();
-    const { movie_id, screen_id, show_date, show_time, price_normal, price_premium, price_recliner } = body;
+    const { movie_id, screen_id, show_date, show_time, price_classic, price_normal, price_premium, price_recliner } = body;
 
     if (!movie_id || !screen_id || !show_date || !show_time) {
       return NextResponse.json({ error: 'Missing required show fields' }, { status: 400 });
     }
 
+    const classicPrice = Number(price_classic ?? price_normal) || 150;
     const newShow = await db.createShow({
       movie_id,
       screen_id,
       show_date,
       show_time,
-      price_normal: Number(price_normal) || 180,
-      price_premium: Number(price_premium) || 250,
-      price_recliner: Number(price_recliner) || 400
-    });
+      price_classic: classicPrice,
+      price_premium: Number(price_premium) || 200,
+      price_normal: classicPrice,
+      price_recliner: classicPrice
+    } as any);
 
     return NextResponse.json({ success: true, show: newShow });
   } catch (err: any) {

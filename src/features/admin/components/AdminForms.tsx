@@ -25,7 +25,7 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
   const {
     movieTitle, movieSynopsis, movieGenre, movieLanguage, movieDuration, movieCertification, moviePoster, movieTrailer, movieIsFeatured, movieSubmitting,
     setMovieField, resetMovieForm, setMovieSubmitting,
-    scheduleMovieId, scheduleScreenId, scheduleDate, scheduleTime, priceNormal, pricePremium, priceRecliner, scheduleSubmitting,
+    scheduleMovieId, scheduleScreenId, scheduleDate, scheduleTime, priceClassic, pricePremium, scheduleSubmitting,
     setScheduleField, resetScheduleForm, setScheduleSubmitting
   } = useAdminStore();
 
@@ -81,9 +81,10 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
           screen_id: scheduleScreenId,
           show_date: scheduleDate,
           show_time: scheduleTime + ':00',
-          price_normal: priceNormal,
+          price_classic: priceClassic,
           price_premium: pricePremium,
-          price_recliner: priceRecliner
+          price_normal: priceClassic,  // backward-compat
+          price_recliner: priceClassic  // backward-compat
         })
       });
       const resData = await res.json();
@@ -414,14 +415,14 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
             🎟️ Seat Category Pricing (INR)
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Normal Price</label>
+              <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Classic Price (₹)</label>
               <input
                 type="number"
                 required
-                value={priceNormal}
-                onChange={(e) => setScheduleField('priceNormal', e.target.value)}
+                value={priceClassic}
+                onChange={(e) => setScheduleField('priceClassic', e.target.value)}
                 style={{
                   background: 'rgba(255,255,255,0.02)',
                   border: '1px solid rgba(255,255,255,0.08)',
@@ -434,7 +435,7 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
               />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Premium Price</label>
+              <label style={{ fontSize: '0.78rem', color: 'var(--gold-500)' }}>Premium Price (₹)</label>
               <input
                 type="number"
                 required
@@ -442,29 +443,11 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
                 onChange={(e) => setScheduleField('pricePremium', e.target.value)}
                 style={{
                   background: 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.08)',
+                  border: '1px solid var(--border-gold)',
                   borderRadius: '8px',
                   padding: '10px',
                   fontSize: '0.9rem',
-                  color: '#FFFFFF',
-                  outline: 'none'
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>Recliner Price</label>
-              <input
-                type="number"
-                required
-                value={priceRecliner}
-                onChange={(e) => setScheduleField('priceRecliner', e.target.value)}
-                style={{
-                  background: 'rgba(255,255,255,0.02)',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '8px',
-                  padding: '10px',
-                  fontSize: '0.9rem',
-                  color: '#FFFFFF',
+                  color: 'var(--gold-500)',
                   outline: 'none'
                 }}
               />

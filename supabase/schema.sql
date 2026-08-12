@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS public.seat_layout (
   screen_id   UUID NOT NULL REFERENCES public.screens(id) ON DELETE CASCADE,
   row_label   TEXT NOT NULL,
   seat_number INTEGER NOT NULL,
-  category    TEXT NOT NULL DEFAULT 'normal' CHECK (category IN ('normal', 'premium', 'recliner')),
+  category    TEXT NOT NULL DEFAULT 'economy' CHECK (category IN ('economy', 'premium')),
   UNIQUE (screen_id, row_label, seat_number)
 );
 
@@ -107,9 +107,11 @@ CREATE TABLE IF NOT EXISTS public.shows (
   screen_id       UUID NOT NULL REFERENCES public.screens(id) ON DELETE CASCADE,
   show_date       DATE NOT NULL,
   show_time       TIME NOT NULL,
-  price_normal    NUMERIC(10,2) NOT NULL DEFAULT 180,
-  price_premium   NUMERIC(10,2) NOT NULL DEFAULT 250,
-  price_recliner  NUMERIC(10,2) NOT NULL DEFAULT 400,
+  price_economy   NUMERIC(10,2) NOT NULL DEFAULT 150,  -- Economy (Stalls)
+  price_premium   NUMERIC(10,2) NOT NULL DEFAULT 200,  -- Premium (Gold centre)
+  -- Legacy columns kept for backward-compat (mirrors price_economy)
+  price_normal    NUMERIC(10,2) NOT NULL DEFAULT 150,
+  price_recliner  NUMERIC(10,2) NOT NULL DEFAULT 150,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (screen_id, show_date, show_time)
 );
@@ -542,36 +544,58 @@ INSERT INTO public.screens (id, name, total_rows, seats_per_row) VALUES
   ('bb28876c-3e6f-4db4-bb14-5d5b12165977', 'Screen 2 (Gold)', 6, 8)
 ON CONFLICT (id) DO NOTHING;
 
--- Seat layouts for Screen 1 (IMAX): rows A-H, 10 seats
--- A-D = normal, E-F = premium, G-H = recliner
+-- Seat layouts — Dhrub Talkies actual hall (matches sketch, front → back)
+-- Rows G,F,E,D,C: 18 seats — Left[1-5] Economy | Centre[6-13] Premium | Right[14-18] Economy
+-- Row A: 13 seats — Centre[6-13] Premium | Right[14-18] Economy (no left)
+-- Row B: 10 seats — Left[1-5] Economy | Right[14-18] Economy (no centre)
+-- Row S (Silver): 10 seats — Left[1-5] | Right[14-18] → Economy ₹150
+-- Row P (Gold): 11 seats — Left[1-6] | Right[7-11]   → Premium ₹200
 INSERT INTO public.seat_layout (screen_id, row_label, seat_number, category)
-SELECT
-  'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c',
-  r.row_label,
-  s.seat_number,
-  CASE
-    WHEN r.row_label IN ('E','F') THEN 'premium'
-    WHEN r.row_label IN ('G','H') THEN 'recliner'
-    ELSE 'normal'
-  END
+-- Rows G-C: full 3-section
+SELECT s.screen_id, r.row_label, n.num,
+  CASE WHEN n.num BETWEEN 6 AND 13 THEN 'premium' ELSE 'economy' END
 FROM
-  (VALUES ('A'),('B'),('C'),('D'),('E'),('F'),('G'),('H')) AS r(row_label),
-  generate_series(1, 10) AS s(seat_number)
+  (VALUES ('a9f1a0e7-3f36-41b2-bb5b-43a0e698889c'::uuid)) AS s(screen_id),
+  (VALUES ('G'),('F'),('E'),('D'),('C')) AS r(row_label),
+  generate_series(1,18) AS n(num)
+UNION ALL
+-- Row A: seats 6-18 only
+SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'A', n.num,
+  CASE WHEN n.num <= 13 THEN 'premium' ELSE 'economy' END
+FROM generate_series(6,18) AS n(num)
+UNION ALL
+-- Row B: seats 1-5 and 14-18 (no centre)
+SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'B', n.num, 'economy'
+FROM unnest(ARRAY[1,2,3,4,5,14,15,16,17,18]) AS n(num)
+UNION ALL
+-- Row S (Silver/Economy)
+SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'S', n.num, 'economy'
+FROM unnest(ARRAY[1,2,3,4,5,14,15,16,17,18]) AS n(num)
+UNION ALL
+-- Row P (Gold/Premium)
+SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'P', n.num, 'premium'
+FROM unnest(ARRAY[1,2,3,4,5,6,7,8,9,10,11]) AS n(num)
 ON CONFLICT (screen_id, row_label, seat_number) DO NOTHING;
 
--- Seat layouts for Screen 2 (Gold): rows A-F, 8 seats
--- A-C = normal, D-E = premium, F = recliner
+-- Screen 2: same layout
 INSERT INTO public.seat_layout (screen_id, row_label, seat_number, category)
-SELECT
-  'bb28876c-3e6f-4db4-bb14-5d5b12165977',
-  r.row_label,
-  s.seat_number,
-  CASE
-    WHEN r.row_label IN ('D','E') THEN 'premium'
-    WHEN r.row_label = 'F'       THEN 'recliner'
-    ELSE 'normal'
-  END
+SELECT s.screen_id, r.row_label, n.num,
+  CASE WHEN n.num BETWEEN 6 AND 13 THEN 'premium' ELSE 'economy' END
 FROM
-  (VALUES ('A'),('B'),('C'),('D'),('E'),('F')) AS r(row_label),
-  generate_series(1, 8) AS s(seat_number)
+  (VALUES ('bb28876c-3e6f-4db4-bb14-5d5b12165977'::uuid)) AS s(screen_id),
+  (VALUES ('G'),('F'),('E'),('D'),('C')) AS r(row_label),
+  generate_series(1,18) AS n(num)
+UNION ALL
+SELECT 'bb28876c-3e6f-4db4-bb14-5d5b12165977', 'A', n.num,
+  CASE WHEN n.num <= 13 THEN 'premium' ELSE 'economy' END
+FROM generate_series(6,18) AS n(num)
+UNION ALL
+SELECT 'bb28876c-3e6f-4db4-bb14-5d5b12165977', 'B', n.num, 'economy'
+FROM unnest(ARRAY[1,2,3,4,5,14,15,16,17,18]) AS n(num)
+UNION ALL
+SELECT 'bb28876c-3e6f-4db4-bb14-5d5b12165977', 'S', n.num, 'economy'
+FROM unnest(ARRAY[1,2,3,4,5,14,15,16,17,18]) AS n(num)
+UNION ALL
+SELECT 'bb28876c-3e6f-4db4-bb14-5d5b12165977', 'P', n.num, 'premium'
+FROM unnest(ARRAY[1,2,3,4,5,6,7,8,9,10,11]) AS n(num)
 ON CONFLICT (screen_id, row_label, seat_number) DO NOTHING;

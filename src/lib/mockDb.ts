@@ -147,47 +147,40 @@ export class MockDatabase implements DatabaseClient {
     const s1 = 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c';
     const s2 = 'bb28876c-3e6f-4db4-bb14-5d5b12165977';
 
-    this.screens.set(s1, { id: s1, name: 'Screen 1 (IMAX)', total_rows: 8, seats_per_row: 10 });
-    this.screens.set(s2, { id: s2, name: 'Screen 2 (Gold)', total_rows: 6, seats_per_row: 8 });
+    this.screens.set(s1, { id: s1, name: 'Screen 1 — Dhrub Talkies', total_rows: 9, seats_per_row: 18 });
+    this.screens.set(s2, { id: s2, name: 'Screen 2 — Dhrub Talkies', total_rows: 9, seats_per_row: 18 });
 
-    // Generate Layouts for Screen 1
-    const screen1Layouts: SeatLayout[] = [];
-    const rowsS1 = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
-    rowsS1.forEach((row) => {
-      let category: SeatLayout['category'] = 'normal';
-      if (['E', 'F'].includes(row)) category = 'premium';
-      if (['G', 'H'].includes(row)) category = 'recliner';
+    // ─────────────────────────────────────────────────────────────
+    // Dhrub Talkies actual hall layout (from sketch, front → back):
+    //
+    //  Rows G, F, E, D, C, B, A — 18 seats: [1-5] | Aisle | [6-13] | Aisle | [14-18]
+    //  Row P (Premium)          — 11 seats: [1-6] left + [7-11] right   → Premium ₹200
+    //
+    //  Category rules:
+    //    Classic  (₹150): all rows G, F, E, D, C, B, A
+    //    Premium  (₹200): Row P only
+    // ─────────────────────────────────────────────────────────────
+    const generateHallLayouts = (screenId: string): SeatLayout[] => {
+      const layouts: SeatLayout[] = [];
 
-      for (let num = 1; num <= 10; num++) {
-        screen1Layouts.push({
-          id: `layout-${s1}-${row}-${num}`,
-          screen_id: s1,
-          row_label: row,
-          seat_number: num,
-          category
-        });
-      }
-    });
+      // Rows G, F, E, D, C, B, A — full 18-seat 3-section layout
+      ['G', 'F', 'E', 'D', 'C', 'B', 'A'].forEach((row) => {
+        for (let num = 1; num <= 18; num++) {
+          layouts.push({ id: `layout-${screenId}-${row}-${num}`, screen_id: screenId, row_label: row, seat_number: num, category: 'classic' });
+        }
+      });
+
+      // Row P (Premium) — left [1-6] + right [7-11] = ₹200 Premium
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].forEach((num) => {
+        layouts.push({ id: `layout-${screenId}-P-${num}`, screen_id: screenId, row_label: 'P', seat_number: num, category: 'premium' });
+      });
+
+      return layouts;
+    };
+
+    const screen1Layouts = generateHallLayouts(s1);
+    const screen2Layouts = generateHallLayouts(s2);
     this.seatLayouts.set(s1, screen1Layouts);
-
-    // Generate Layouts for Screen 2
-    const screen2Layouts: SeatLayout[] = [];
-    const rowsS2 = ['A', 'B', 'C', 'D', 'E', 'F'];
-    rowsS2.forEach((row) => {
-      let category: SeatLayout['category'] = 'normal';
-      if (['D', 'E'].includes(row)) category = 'premium';
-      if (row === 'F') category = 'recliner';
-
-      for (let num = 1; num <= 8; num++) {
-        screen2Layouts.push({
-          id: `layout-${s2}-${row}-${num}`,
-          screen_id: s2,
-          row_label: row,
-          seat_number: num,
-          category
-        });
-      }
-    });
     this.seatLayouts.set(s2, screen2Layouts);
 
     // 4. Seed Shows
@@ -213,9 +206,10 @@ export class MockDatabase implements DatabaseClient {
           screen_id: s1,
           show_date: date,
           show_time: time,
-          price_normal: 180,
-          price_premium: 250,
-          price_recliner: 400,
+          price_classic: 150,
+          price_premium: 200,
+          price_normal: 150,
+          price_recliner: 150,
           created_at: new Date().toISOString()
         });
         
@@ -249,9 +243,10 @@ export class MockDatabase implements DatabaseClient {
           screen_id: s2,
           show_date: date,
           show_time: time,
+          price_classic: 150,
+          price_premium: 200,
           price_normal: 150,
-          price_premium: 220,
-          price_recliner: 350,
+          price_recliner: 150,
           created_at: new Date().toISOString()
         });
 
@@ -478,9 +473,8 @@ export class MockDatabase implements DatabaseClient {
       const layout = screenLayouts.find(l => l.id === layoutId);
       if (!layout) throw new Error('Invalid seat layout');
 
-      let price = show.price_normal;
+      let price = show.price_classic ?? (show as any).price_normal ?? 150;
       if (layout.category === 'premium') price = show.price_premium;
-      if (layout.category === 'recliner') price = show.price_recliner;
       
       total += Number(price);
       itemizedSeats.push({ seat_layout_id: layoutId, price: Number(price) });

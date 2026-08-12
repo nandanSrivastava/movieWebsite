@@ -267,11 +267,10 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
       selectedSeatLabels.push(`${seat.seat_layout.row_label}-${seat.seat_layout.seat_number}`);
       
       const category = seat.seat_layout.category;
-      const price = {
-        normal: show.price_normal,
-        premium: show.price_premium,
-        recliner: show.price_recliner
-      }[category];
+        const price = {
+          classic: (show as any).price_classic ?? (show as any).price_economy ?? (show as any).price_normal ?? 150,
+          premium: show.price_premium
+        }[category as 'classic' | 'premium'] ?? (show as any).price_classic ?? 150;
       totalAmount += Number(price);
     }
   });

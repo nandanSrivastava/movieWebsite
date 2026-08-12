@@ -214,10 +214,9 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     let total = 0;
     const items = layouts.map((layout) => {
       const price = {
-        normal: show.price_normal,
-        premium: show.price_premium,
-        recliner: show.price_recliner
-      }[layout.category as 'normal' | 'premium' | 'recliner'];
+        classic: (show as any).price_classic ?? show.price_normal ?? 150,
+        premium: show.price_premium
+      }[layout.category as 'classic' | 'premium'] ?? (show as any).price_classic ?? 150;
       total += Number(price);
       return { seat_layout_id: layout.id, price: Number(price) };
     });

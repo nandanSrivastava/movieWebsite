@@ -22,9 +22,8 @@ interface AdminFormState {
   scheduleScreenId: string;
   scheduleDate: string;
   scheduleTime: string;
-  priceNormal: string;
+  priceClassic: string;
   pricePremium: string;
-  priceRecliner: string;
   scheduleSubmitting: boolean;
 
   setScheduleField: (field: string, value: string) => void;
@@ -49,9 +48,8 @@ const initialScheduleForm = {
   scheduleScreenId: '',
   scheduleDate: '',
   scheduleTime: '',
-  priceNormal: '180',
-  pricePremium: '250',
-  priceRecliner: '400',
+  priceClassic: '150',
+  pricePremium: '200',
 };
 
 export const useAdminStore = create<AdminFormState>((set) => ({

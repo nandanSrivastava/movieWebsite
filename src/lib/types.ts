@@ -35,7 +35,7 @@ export interface SeatLayout {
   screen_id: string;
   row_label: string;
   seat_number: number;
-  category: 'normal' | 'premium' | 'recliner';
+  category: 'classic' | 'premium';
 }
 
 export interface Show {
@@ -44,9 +44,8 @@ export interface Show {
   screen_id: string;
   show_date: string;
   show_time: string;
-  price_normal: number;
-  price_premium: number;
-  price_recliner: number;
+  price_classic: number;   // ₹150
+  price_premium: number;   // ₹200 
   created_at: string;
   // Joins
   movie?: Movie;
