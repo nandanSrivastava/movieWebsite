@@ -41,6 +41,7 @@
   --accent-crimson:       var(--crimson);
   --accent-crimson-hover: var(--crimson-hover);
   --accent-crimson-glow:  var(--crimson-glow);
+  --accent-green:         #10B981;
 
   /* Text hierarchy (Crisp whites & muted golds) */
   --text-primary:   #F8F9FA;
@@ -143,6 +144,7 @@
   --crimson:       #D9480F; /* slightly darker for better contrast */
   --crimson-hover: #F06E00;
   --crimson-glow:  rgba(217, 72, 15, 0.2);
+  --accent-green:  #059669;
 
   /* Text hierarchy for light mode */
   --text-primary:   #212529;
