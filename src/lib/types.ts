@@ -73,6 +73,7 @@ export interface Booking {
   booking_channel: 'online' | 'counter';
   customer_name: string | null;
   customer_phone: string | null;
+  customer_email: string | null;
   total_amount: number;
   payment_status: 'pending' | 'paid' | 'failed' | 'refunded';
   razorpay_order_id: string | null;
@@ -125,7 +126,7 @@ export interface DatabaseClient {
     seatLayoutIds: string[],
     userId: string | null,
     channel: 'online' | 'counter',
-    customerDetails: { name?: string; phone?: string; idempotencyKey?: string }
+    customerDetails: { name?: string; phone?: string; email?: string; idempotencyKey?: string }
   ): Promise<Booking>;
   confirmBooking(bookingId: string, showId: string, seatLayoutIds: string[], userId: string | null): Promise<boolean>;
   finalizeBooking(bookingId: string, paymentId: string, qrToken: string): Promise<Booking>;

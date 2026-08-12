@@ -2,9 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
+import { rateLimiter } from '@/lib/rateLimit';
 
 export async function POST(req: NextRequest) {
   try {
+    // Unauthenticated by design (fallback after a successful Razorpay payment),
+    // so rate-limit it to prevent it being used as a free API/refund hammer.
+    const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';
+    if (rateLimiter.isRateLimited(ip, 10, 60000)) {
+      return NextResponse.json({ error: 'Too many verification attempts. Please wait a minute.' }, { status: 429 });
+    }
+
     const { bookingId, paymentId } = await req.json();
 
     if (!bookingId || !paymentId) {
@@ -18,6 +26,11 @@ export async function POST(req: NextRequest) {
 
     if (booking.payment_status === 'paid') {
       return NextResponse.json({ status: 'confirmed' });
+    }
+
+    // Do not re-trigger a refund for a booking already handled by the webhook
+    if (booking.payment_status === 'refunded') {
+      return NextResponse.json({ status: 'refunded', error: 'Booking was already refunded' });
     }
 
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
@@ -37,6 +50,8 @@ export async function POST(req: NextRequest) {
 
       if (success) {
         const qrToken = `tkt_${booking.id}_${crypto.randomBytes(8).toString('hex')}`;
+        // finalizeBooking is idempotent: if the webhook already finalized this
+        // booking, this call returns the existing paid booking untouched.
         await db.finalizeBooking(booking.id, paymentId, qrToken);
         await db.logAudit(booking.booked_by, 'PAYMENT_VERIFY_FALLBACK_SUCCESS', {
           bookingId: booking.id,

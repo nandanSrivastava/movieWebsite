@@ -457,7 +457,7 @@ export class MockDatabase implements DatabaseClient {
     seatLayoutIds: string[],
     userId: string | null,
     channel: 'online' | 'counter',
-    customerDetails: { name?: string; phone?: string; idempotencyKey?: string }
+    customerDetails: { name?: string; phone?: string; email?: string; idempotencyKey?: string }
   ): Promise<Booking> {
     if (customerDetails.idempotencyKey) {
       const existing = Array.from(this.bookings.values()).find(
@@ -496,6 +496,7 @@ export class MockDatabase implements DatabaseClient {
       booking_channel: channel,
       customer_name: customerDetails.name || null,
       customer_phone: customerDetails.phone || null,
+      customer_email: customerDetails.email || null,
       total_amount: total,
       payment_status: 'pending',
       razorpay_order_id: orderId,
@@ -550,9 +551,12 @@ export class MockDatabase implements DatabaseClient {
     const booking = this.bookings.get(bookingId);
     if (!booking) throw new Error('Booking not found');
 
-    booking.payment_status = 'paid';
-    booking.razorpay_payment_id = paymentId;
-    booking.qr_code_token = qrToken;
+    // Idempotent: first finalize wins, QR token stays stable on duplicates
+    if (booking.payment_status !== 'paid') {
+      booking.payment_status = 'paid';
+      booking.razorpay_payment_id = paymentId;
+      booking.qr_code_token = qrToken;
+    }
 
     return booking;
   }

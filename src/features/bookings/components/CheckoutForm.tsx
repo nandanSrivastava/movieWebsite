@@ -8,6 +8,8 @@ interface CheckoutFormProps {
   setCustomerName: (n: string) => void;
   customerPhone: string;
   setCustomerPhone: (p: string) => void;
+  customerEmail: string;
+  setCustomerEmail: (e: string) => void;
   totalAmount: number;
   paying: boolean;
   handleCheckoutSubmit: (e: React.FormEvent) => void;
@@ -15,7 +17,8 @@ interface CheckoutFormProps {
 
 export default function CheckoutForm({
   user, paymentMethod, setPaymentMethod, customerName, setCustomerName,
-  customerPhone, setCustomerPhone, totalAmount, paying, handleCheckoutSubmit
+  customerPhone, setCustomerPhone, customerEmail, setCustomerEmail,
+  totalAmount, paying, handleCheckoutSubmit
 }: CheckoutFormProps) {
   return (
     <div style={{ 
@@ -92,6 +95,31 @@ export default function CheckoutForm({
             value={customerPhone}
             onChange={(e) => setCustomerPhone(e.target.value)}
             required
+            disabled={paying}
+            style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.01)',
+              border: '1px solid var(--border-subtle)',
+              color: '#FFFFFF',
+              padding: '12px 14px',
+              borderRadius: '8px',
+              fontSize: '0.95rem',
+              width: '100%',
+              outline: 'none',
+              boxSizing: 'border-box'
+            }}
+          />
+        </div>
+
+        <div className="form-group">
+          <label className="form-label" style={{ fontWeight: 600 }}>
+            Email (for your digital ticket)
+          </label>
+          <input
+            type="email"
+            className="form-control"
+            placeholder="name@example.com"
+            value={customerEmail}
+            onChange={(e) => setCustomerEmail(e.target.value)}
             disabled={paying}
             style={{
               backgroundColor: 'rgba(255, 255, 255, 0.01)',

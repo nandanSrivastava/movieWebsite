@@ -192,7 +192,7 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     seatLayoutIds: string[],
     userId: string | null,
     channel: 'online' | 'counter',
-    customerDetails: { name?: string; phone?: string; idempotencyKey?: string }
+    customerDetails: { name?: string; phone?: string; email?: string; idempotencyKey?: string }
   ): Promise<Booking> {
     // 1. Double check client idempotency
     if (customerDetails.idempotencyKey) {
@@ -231,6 +231,7 @@ export class SupabaseDatabaseClient implements DatabaseClient {
       booking_channel: channel,
       customer_name: customerDetails.name || null,
       customer_phone: customerDetails.phone || null,
+      customer_email: customerDetails.email || null,
       total_amount: total,
       payment_status: 'pending',
       razorpay_order_id: razorpayOrderId,
@@ -264,6 +265,9 @@ export class SupabaseDatabaseClient implements DatabaseClient {
   }
 
   public async finalizeBooking(bookingId: string, paymentId: string, qrToken: string): Promise<Booking> {
+    // Idempotent: only a booking still 'pending' may be finalized. If the webhook
+    // and the verify-payment fallback race each other, the FIRST finalize wins
+    // and the QR token stays stable — a second call just returns the paid booking.
     const { data, error } = await this.supabase
       .from('bookings')
       .update({
@@ -272,11 +276,25 @@ export class SupabaseDatabaseClient implements DatabaseClient {
         qr_code_token: qrToken
       })
       .eq('id', bookingId)
+      .eq('payment_status', 'pending')
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
-    return data;
+
+    if (data) return data;
+
+    // No pending row was updated — fetch the current state. If it's already
+    // paid, another path finalized it first; return it unchanged (idempotent).
+    const { data: current } = await this.supabase
+      .from('bookings')
+      .select('*')
+      .eq('id', bookingId)
+      .maybeSingle();
+
+    if (current?.payment_status === 'paid') return current;
+
+    throw new Error('Booking could not be finalized');
   }
 
   public async updateBookingStatus(bookingId: string, status: Booking['payment_status']): Promise<Booking> {

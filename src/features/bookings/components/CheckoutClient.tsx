@@ -39,6 +39,7 @@ export default function CheckoutClient({
   // Form Fields
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'cash'>('online');
   
   // Simulated Modal State
@@ -49,6 +50,7 @@ export default function CheckoutClient({
     if (user) {
       setCustomerName(user.full_name || '');
       setCustomerPhone(user.phone || '');
+      setCustomerEmail(user.email || '');
     }
   }, [user]);
 
@@ -71,6 +73,7 @@ export default function CheckoutClient({
           seatLayoutIds,
           customerName,
           customerPhone,
+          customerEmail: customerEmail.trim(),
           idempotencyKey,
           paymentMethod
         })
@@ -254,6 +257,8 @@ export default function CheckoutClient({
           setCustomerName={setCustomerName}
           customerPhone={customerPhone}
           setCustomerPhone={setCustomerPhone}
+          customerEmail={customerEmail}
+          setCustomerEmail={setCustomerEmail}
           totalAmount={totalAmount}
           paying={paying}
           handleCheckoutSubmit={handleCheckoutSubmit}

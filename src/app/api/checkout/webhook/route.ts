@@ -3,6 +3,26 @@ import crypto from 'crypto';
 import { db, isMockMode } from '@/lib/db';
 import { createClient } from '@supabase/supabase-js';
 import Razorpay from 'razorpay';
+import { ticketConfirmationEmail } from '@/lib/email/templates';
+import { sendEmail, isEmailConfigured } from '@/lib/mailer';
+
+function buildBookingEmailContext(booking: any) {
+  const seatsStr = booking.booking_seats
+    ?.map((bs: any) => `${bs.seat_layout?.row_label || ''}-${bs.seat_layout?.seat_number || ''}`)
+    .join(', ') || 'N/A';
+
+  return {
+    customerName: booking.customer_name,
+    bookingId: booking.id,
+    movieTitle: booking.show?.movie?.title || 'Movie',
+    screenName: booking.show?.screen?.name || 'Standard Screen',
+    showDate: booking.show?.show_date || '—',
+    showTime: booking.show?.show_time || '—',
+    seats: seatsStr,
+    totalAmount: Number(booking.total_amount),
+    qrToken: undefined as string | undefined,
+  };
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -63,16 +83,31 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const isSupabaseConfigured = 
+      !!process.env.NEXT_PUBLIC_SUPABASE_URL && 
+      (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+    // Fallback: if notes didn't carry the bookingId but we have the Razorpay
+    // order id, resolve the booking from the DB (notes can be absent/edited).
+    if (!bookingId && orderId && isSupabaseConfigured) {
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
+      const { data: byOrder } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('razorpay_order_id', orderId)
+        .maybeSingle();
+      if (byOrder) bookingId = byOrder.id;
+    }
+
     if (!bookingId) {
       return NextResponse.json({ error: 'Missing bookingId notes' }, { status: 400 });
     }
 
     // ── ATOMIC IDEMPOTENCY GUARD ──────────────────────────────
     // Check if this webhook event was already processed
-    const isSupabaseConfigured = 
-      !!process.env.NEXT_PUBLIC_SUPABASE_URL && 
-      (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-
     if (isSupabaseConfigured) {
       const supabase = createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -114,7 +149,7 @@ export async function POST(req: NextRequest) {
       // Confirm success: generate secure QR Code ticket validation token
       const qrToken = `tkt_${booking.id}_${crypto.randomBytes(8).toString('hex')}`;
       
-      // Finalize paid ticket booking
+      // Finalize paid ticket booking (idempotent — safe against webhook retries)
       await db.finalizeBooking(booking.id, paymentId, qrToken);
       
       // Audit log success
@@ -125,40 +160,30 @@ export async function POST(req: NextRequest) {
         amount: booking.total_amount
       });
 
-      // Send email
-      if (process.env.SMTP_USER) {
-        try {
-          const { sendEmail } = await import('@/lib/mailer');
-          let customerEmail = 'customer@example.com';
-          if (isSupabaseConfigured && booking.booked_by) {
-            const supabase = createClient(
-              process.env.NEXT_PUBLIC_SUPABASE_URL!,
-              process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-            );
-            const { data: userData } = await supabase.auth.admin.getUserById(booking.booked_by);
-            if (userData?.user?.email) {
-              customerEmail = userData.user.email;
-            }
-          }
+      // Send ticket confirmation email (only when a real address exists —
+      // never email the placeholder, and never crash the webhook on mail failure)
+      let customerEmail: string | null = booking.customer_email || null;
+      if (!customerEmail && isSupabaseConfigured && booking.booked_by) {
+        const supabase = createClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+        const { data: userData } = await supabase.auth.admin.getUserById(booking.booked_by);
+        if (userData?.user?.email) {
+          customerEmail = userData.user.email;
+        }
+      }
 
-          const seatsStr = booking.booking_seats?.map(bs => `${bs.seat_layout?.row_label || ''}-${bs.seat_layout?.seat_number || ''}`).join(', ') || 'N/A';
-          const emailHtml = `
-            <div style="font-family: sans-serif; padding: 20px;">
-              <h2>Ticket Confirmed!</h2>
-              <p>Hi ${booking.customer_name || 'Movie Buff'},</p>
-              <p>Your payment of ₹${booking.total_amount} is successful.</p>
-              <div style="background: #f4f4f4; padding: 15px; border-radius: 8px;">
-                <p><strong>Booking ID:</strong> ${booking.id}</p>
-                <p><strong>Seats:</strong> ${seatsStr}</p>
-                <p><strong>QR Token:</strong> ${qrToken}</p>
-              </div>
-              <p>Show this email at the entrance.</p>
-            </div>
-          `;
+      if (customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail) && isEmailConfigured()) {
+        try {
+          const { generateQRCodeDataUrl } = await import('@/features/shared/utils/qr');
+          const qrCodeDataUrl = await generateQRCodeDataUrl(qrToken);
+          const ctx = buildBookingEmailContext(booking);
+          const html = ticketConfirmationEmail({ ...ctx, qrCodeDataUrl, qrToken });
           await sendEmail({
             to: customerEmail,
-            subject: 'Dhrub Cineplex - Ticket Confirmation',
-            html: emailHtml
+            subject: `Dhrub Cineplex — Ticket Confirmed (${ctx.movieTitle})`,
+            html
           });
         } catch (emailErr) {
           console.error('Failed to send confirmation email:', emailErr);

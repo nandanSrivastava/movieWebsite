@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS public.bookings (
   booking_channel         TEXT NOT NULL DEFAULT 'online' CHECK (booking_channel IN ('online', 'counter')),
   customer_name           TEXT,
   customer_phone          TEXT,
+  customer_email          TEXT,
   total_amount            NUMERIC(10,2) NOT NULL DEFAULT 0,
   payment_status          TEXT NOT NULL DEFAULT 'pending' CHECK (payment_status IN ('pending', 'paid', 'failed', 'refunded')),
   razorpay_order_id       TEXT,
@@ -207,22 +208,44 @@ CREATE TABLE IF NOT EXISTS public.processed_webhook_events (
 -- ── lock_seats() ────────────────────────────────────────────
 -- Atomically locks seats for a user. Returns TRUE on success, FALSE if any seat
 -- is already taken (concurrent safety via FOR UPDATE NOWAIT).
+-- Also re-claims seats whose lock has EXPIRED but the cron sweep hasn't run yet,
+-- and caps how many seats a single user may hold at once (anti seat-hogging).
 CREATE OR REPLACE FUNCTION public.lock_seats(
   p_show_id         UUID,
   p_seat_layout_ids UUID[],
   p_user_id         UUID,
-  p_ui_hold_seconds INTEGER DEFAULT 360
+  p_ui_hold_seconds INTEGER DEFAULT 360,
+  p_max_seats       INTEGER DEFAULT 10
 )
 RETURNS BOOLEAN
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 DECLARE
-  v_expires_at TIMESTAMPTZ;
-  v_row        RECORD;
+  v_expires_at   TIMESTAMPTZ;
+  v_row          RECORD;
+  v_updated      INTEGER;
+  v_active_locks INTEGER;
 BEGIN
   -- Add 15s server-side buffer on top of UI countdown
   v_expires_at := NOW() + ((p_ui_hold_seconds + 15) * INTERVAL '1 second');
+
+  -- Guard: reject empty seat lists
+  IF cardinality(p_seat_layout_ids) = 0 THEN
+    RETURN FALSE;
+  END IF;
+
+  -- Guard: never let one user hoard more than p_max_seats across ALL shows.
+  -- This blocks scripted seat-hogging (lock every seat, hold 6 min, repeat).
+  SELECT COUNT(*) INTO v_active_locks
+  FROM public.seat_status
+  WHERE locked_by = p_user_id
+    AND status = 'locked'
+    AND lock_expires_at > NOW();
+
+  IF v_active_locks + cardinality(p_seat_layout_ids) > p_max_seats THEN
+    RETURN FALSE;
+  END IF;
 
   -- Attempt to lock all requested seats atomically (NOWAIT = fail immediately if locked)
   BEGIN
@@ -232,11 +255,13 @@ BEGIN
         AND seat_layout_id = ANY(p_seat_layout_ids)
       FOR UPDATE NOWAIT
     LOOP
-      -- Check each row is still available (or lock has expired)
-      IF (SELECT status FROM public.seat_status WHERE id = v_row.id) != 'available' THEN
-        IF NOT ((SELECT status FROM public.seat_status WHERE id = v_row.id) = 'locked' AND (SELECT lock_expires_at FROM public.seat_status WHERE id = v_row.id) < NOW()) THEN
-          RETURN FALSE;
-        END IF;
+      -- Each row must be available, or an EXPIRED lock that the sweep hasn't released yet
+      IF (SELECT status FROM public.seat_status WHERE id = v_row.id) = 'booked' THEN
+        RETURN FALSE;
+      END IF;
+      IF (SELECT status FROM public.seat_status WHERE id = v_row.id) = 'locked'
+         AND (SELECT lock_expires_at FROM public.seat_status WHERE id = v_row.id) >= NOW() THEN
+        RETURN FALSE; -- held by another (or same) user, not yet expired
       END IF;
     END LOOP;
   EXCEPTION
@@ -244,7 +269,9 @@ BEGIN
       RETURN FALSE;
   END;
 
-  -- All seats are available — acquire the locks
+  -- Acquire the locks. Expired 'locked' rows count as claimable here too, so a
+  -- seat that looks 'available' in the UI can actually be locked again even
+  -- before the pg_cron sweep runs.
   UPDATE public.seat_status
   SET
     status          = 'locked',
@@ -253,10 +280,12 @@ BEGIN
     lock_expires_at = v_expires_at
   WHERE show_id = p_show_id
     AND seat_layout_id = ANY(p_seat_layout_ids)
-    AND status = 'available';
+    AND (status = 'available' OR (status = 'locked' AND lock_expires_at < NOW()));
 
-  -- If we didn't update the expected number of rows, something slipped through
-  IF NOT FOUND THEN
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+
+  -- All requested seats must have been locked
+  IF v_updated <> cardinality(p_seat_layout_ids) THEN
     RETURN FALSE;
   END IF;
 
@@ -267,6 +296,8 @@ $$;
 -- ── confirm_booking() ────────────────────────────────────────
 -- Validates locks still belong to the user then marks seats as booked.
 -- Called server-side after payment confirmation.
+-- Uses FOR UPDATE so two concurrent confirmations of the same seats serialize:
+-- the loser's re-check sees 'booked' and returns FALSE (no double-sell).
 CREATE OR REPLACE FUNCTION public.confirm_booking(
   p_booking_id      UUID,
   p_show_id         UUID,
@@ -278,20 +309,36 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
 DECLARE
-  v_invalid_count INTEGER;
+  v_row  RECORD;
 BEGIN
-  -- For counter bookings (p_user_id IS NULL), skip lock ownership check
-  IF p_user_id IS NOT NULL THEN
-    SELECT COUNT(*) INTO v_invalid_count
-    FROM public.seat_status
-    WHERE show_id        = p_show_id
-      AND seat_layout_id = ANY(p_seat_layout_ids)
-      AND (status != 'locked' OR locked_by != p_user_id OR lock_expires_at < NOW());
-
-    IF v_invalid_count > 0 THEN
-      RETURN FALSE;
-    END IF;
+  -- Guard: a booking must reference at least one seat
+  IF cardinality(p_seat_layout_ids) = 0 THEN
+    RETURN FALSE;
   END IF;
+
+  -- Lock the seat rows for this booking (serializes concurrent confirmations)
+  FOR v_row IN
+    SELECT status, locked_by, lock_expires_at
+    FROM public.seat_status
+    WHERE show_id = p_show_id
+      AND seat_layout_id = ANY(p_seat_layout_ids)
+    FOR UPDATE
+  LOOP
+    -- For counter bookings (p_user_id IS NULL), skip lock ownership check
+    IF p_user_id IS NOT NULL THEN
+      IF v_row.status != 'locked'
+         OR v_row.locked_by != p_user_id
+         OR v_row.lock_expires_at IS NULL
+         OR v_row.lock_expires_at < NOW() THEN
+        RETURN FALSE;
+      END IF;
+    ELSE
+      -- Counter sale: seats must at least be free (not already sold)
+      IF v_row.status = 'booked' THEN
+        RETURN FALSE;
+      END IF;
+    END IF;
+  END LOOP;
 
   -- Mark seats as permanently booked
   UPDATE public.seat_status
@@ -383,8 +430,18 @@ CREATE POLICY "profiles: own row read" ON public.profiles
 CREATE POLICY "profiles: staff read all" ON public.profiles
   FOR SELECT USING (public.is_staff());
 
+-- Own-row updates are allowed ONLY if the user does not change their own role.
+-- WITHOUT this WITH CHECK, any user could set role='admin' on their own row and
+-- self-promote (critical privilege escalation via the public anon key).
 CREATE POLICY "profiles: own row update" ON public.profiles
-  FOR UPDATE USING (auth.uid() = id);
+  FOR UPDATE USING (auth.uid() = id)
+  WITH CHECK (
+    auth.uid() = id
+    AND (
+      public.is_admin()
+      OR role = (SELECT p.role FROM public.profiles p WHERE p.id = auth.uid())
+    )
+  );
 
 CREATE POLICY "profiles: admin update role" ON public.profiles
   FOR UPDATE USING (public.is_admin());
@@ -433,14 +490,16 @@ CREATE POLICY "seat_status: staff write" ON public.seat_status
   FOR UPDATE USING (public.is_staff());
 
 -- ── bookings ────────────────────────────────────────────────
+-- NOTE: the app writes bookings/booking_seats exclusively through the service
+-- role (server API routes), which bypasses RLS. There are intentionally NO
+-- public INSERT policies here: with the anon key (public), an attacker could
+-- insert a row with payment_status='paid' + a chosen qr_code_token and forge
+-- valid tickets that the counter verify endpoint would accept.
 CREATE POLICY "bookings: user reads own" ON public.bookings
   FOR SELECT USING (auth.uid() = booked_by);
 
 CREATE POLICY "bookings: staff reads all" ON public.bookings
   FOR SELECT USING (public.is_staff());
-
-CREATE POLICY "bookings: authenticated insert" ON public.bookings
-  FOR INSERT WITH CHECK (auth.uid() IS NOT NULL OR booking_channel = 'counter');
 
 CREATE POLICY "bookings: staff update" ON public.bookings
   FOR UPDATE USING (public.is_staff());
@@ -454,22 +513,13 @@ CREATE POLICY "booking_seats: user reads own" ON public.booking_seats
 CREATE POLICY "booking_seats: staff reads all" ON public.booking_seats
   FOR SELECT USING (public.is_staff());
 
-CREATE POLICY "booking_seats: insert" ON public.booking_seats
-  FOR INSERT WITH CHECK (TRUE); -- controlled by bookings insert policy
-
 -- ── audit_logs ──────────────────────────────────────────────
 CREATE POLICY "audit_logs: admin read" ON public.audit_logs
   FOR SELECT USING (public.is_admin());
 
-CREATE POLICY "audit_logs: insert all" ON public.audit_logs
-  FOR INSERT WITH CHECK (TRUE); -- server-side only via service role
-
 -- ── processed_webhook_events ─────────────────────────────────
 CREATE POLICY "processed_webhook_events: admin read" ON public.processed_webhook_events
   FOR SELECT USING (public.is_admin());
-
-CREATE POLICY "processed_webhook_events: insert all" ON public.processed_webhook_events
-  FOR INSERT WITH CHECK (TRUE);
 
 -- ============================================================
 -- SEED DATA (optional — comment out for production)

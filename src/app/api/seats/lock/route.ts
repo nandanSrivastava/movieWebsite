@@ -70,6 +70,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized session' }, { status: 401 });
     }
 
+    // 2.5. Verify Show is not in the past
+    const show = await db.getShowById(showId);
+    if (!show) {
+      return NextResponse.json({ error: 'Show not found' }, { status: 404 });
+    }
+    
+    // show_date is usually "YYYY-MM-DD" and show_time is "HH:mm"
+    const showDateTime = new Date(`${show.show_date}T${show.show_time}:00Z`);
+    // Assuming the timezone is handled, or we just compare with now (maybe with some offset).
+    // Let's parse it safely
+    let isPast = false;
+    try {
+      const showDateStr = `${show.show_date}T${show.show_time}`;
+      const showDateObj = new Date(showDateStr);
+      if (showDateObj.getTime() < Date.now()) {
+        isPast = true;
+      }
+    } catch(e) {
+      // fallback
+    }
+
+    if (isPast) {
+      return NextResponse.json({ error: 'Cannot book seats for a show that has already started or is in the past.' }, { status: 400 });
+    }
+
     // 3. Invoke Atomic Transaction Locking
     const success = await db.lockSeats(showId, seatLayoutIds, userId);
 

@@ -15,6 +15,8 @@ const loginSchema = z.object({
 });
 
 const signUpSchema = loginSchema.extend({
+  password: z.string().min(8, "Password must be at least 8 characters long").max(255, "Password is too long")
+    .refine(val => !/[<>]/.test(val), { message: "Invalid characters in password" }),
   fullName: z.string().trim().min(1, "Please provide your name").max(100, "Name is too long")
     .refine(val => !/[<>]/.test(val), { message: "Invalid characters in name" }),
   phone: z.string().trim().min(1, "Please provide your phone number").max(20, "Phone number is too long"),
@@ -234,7 +236,9 @@ function LoginContent() {
                     if (!isMockMode) {
                       try {
                         const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
-                        await supabase.auth.resetPasswordForEmail(email);
+                        await supabase.auth.resetPasswordForEmail(email, {
+                          redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`
+                        });
                         showToast('Password reset link sent to your email.', 'success');
                       } catch {
                         showToast('Failed to send reset link.', 'error');
