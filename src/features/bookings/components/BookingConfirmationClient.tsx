@@ -21,7 +21,7 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
   const [hasNotified, setHasNotified] = useState(false);
 
   // ── 1. WEBHOOK COMPLETION POLLING WITH REACT QUERY ───────────
-  const { data: booking } = useQuery({
+  const { data: booking, refetch } = useQuery({
     queryKey: ['bookingStatus', initialBooking.id],
     queryFn: async () => {
       setPollingAttempts(p => p + 1);
@@ -61,7 +61,7 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
           body: JSON.stringify({ bookingId: initialBooking.id, paymentId })
         }).then(res => res.json()).then(data => {
           if (data.status === 'confirmed' || data.status === 'refunded') {
-             // Query will automatically refetch
+             refetch();
           } else {
              showToast('Payment verification timed out. Please contact support.', 'error');
           }
