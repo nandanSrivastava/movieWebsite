@@ -483,3 +483,29 @@ body::before {
     transform: translateY(0);
   }
 }
+
+/* ── SEATING GRID RESPONSIVE CONTAINER ──────────────────── */
+.seating-grid-container {
+  overflow-x: auto;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding-bottom: 20px;
+  z-index: 2;
+}
+
+.seating-grid-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: fit-content;
+}
+
+@media (max-width: 768px) {
+  .seating-grid-container {
+    display: block;
+  }
+  .seating-grid-inner {
+    margin: 0 auto;
+  }
+}

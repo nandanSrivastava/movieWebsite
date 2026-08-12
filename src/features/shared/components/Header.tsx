@@ -1,17 +1,39 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
-import { ThemeToggle } from '@/features/shared/components/ThemeToggle';
+import { useTheme } from 'next-themes';
+import { User, LogOut, LogIn, Ticket, Sun, Moon } from 'lucide-react';
 
 export default function Header() {
   const pathname = usePathname();
   const { user, signOut } = useCineBookAuth();
   const isHome = pathname === '/';
   const [scrolled, setScrolled] = useState(!isHome);
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [currentUrl, setCurrentUrl] = useState('/login');
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      const search = window.location.search;
+      if (path && path !== '/login') {
+        setCurrentUrl(`/login?redirect=${encodeURIComponent(path + search)}`);
+      } else {
+        setCurrentUrl('/login');
+      }
+    }
+  }, [pathname]);
 
   useEffect(() => {
     if (!isHome) {
@@ -23,6 +45,16 @@ export default function Header() {
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, [isHome]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleLogout = async () => {
     try { await signOut(); } catch (e) { console.error(e); }
@@ -57,6 +89,16 @@ export default function Header() {
             top: 12px;
             width: calc(100% - 24px);
             border-radius: 16px;
+          }
+          .hdr-nav {
+            display: none;
+          }
+          .hdr-logo-name {
+            font-size: 1.1rem;
+          }
+          .hdr-logo-sub {
+            font-size: 0.55rem;
+            letter-spacing: 0.12em;
           }
         }
         .site-header.scrolled {
@@ -186,91 +228,169 @@ export default function Header() {
           align-items: center;
           gap: 16px;
         }
-        .site-header.top .hdr-user-pill {
-          background: rgba(255,255,255,0.03);
-          border-color: rgba(255,255,255,0.08);
+
+        /* Dropdown Styles */
+        .hdr-user-dropdown-container {
+          position: relative;
+          display: inline-block;
         }
-        .site-header.top .hdr-user-pill:hover {
-          background: rgba(255,255,255,0.08);
+        .hdr-user-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 44px;
+          height: 44px;
+          border-radius: 50%;
+          background: var(--bg-surface);
+          border: 1px solid var(--border-default);
+          color: var(--text-primary);
+          cursor: pointer;
+          transition: all 0.3s var(--ease-out-expo);
+          box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .hdr-user-btn:hover, .hdr-user-btn.active {
+          background: var(--border-subtle);
+          border-color: var(--border-strong);
+          transform: scale(1.05);
+          color: var(--gold-500);
+        }
+        .site-header.top .hdr-user-btn {
+          background: rgba(255,255,255,0.06);
           border-color: rgba(255,255,255,0.15);
+          color: rgba(255,255,255,0.9);
         }
-        .hdr-user-pill {
+        .site-header.top .hdr-user-btn:hover, .site-header.top .hdr-user-btn.active {
+          background: rgba(255,255,255,0.15);
+          border-color: rgba(255,255,255,0.3);
+          color: var(--gold-400);
+        }
+        .hdr-dropdown-menu {
+          position: absolute;
+          top: 56px;
+          right: 0;
+          width: 250px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border-default);
+          border-radius: 16px;
+          box-shadow: var(--shadow-lg), 0 10px 40px rgba(0,0,0,0.5);
+          padding: 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          transform-origin: top right;
+          animation: dropdownFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+          z-index: 1100;
+          backdrop-filter: blur(16px);
+        }
+        @keyframes dropdownFadeIn {
+          from { opacity: 0; transform: scale(0.95) translateY(-8px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .hdr-dropdown-header {
+          padding: 8px 12px 12px;
+          border-bottom: 1px solid var(--border-subtle);
+          margin-bottom: 6px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .hdr-dropdown-username {
+          font-size: 0.9rem;
+          font-weight: 600;
+          color: var(--text-primary);
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .hdr-dropdown-role {
+          font-size: 0.72rem;
+          font-weight: 600;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          color: var(--gold-500);
+        }
+        .hdr-dropdown-item {
           display: flex;
           align-items: center;
           gap: 12px;
-          padding: 6px 8px 6px 16px;
-          background: var(--bg-surface);
-          border: 1px solid var(--border-default);
-          border-radius: 100px;
-          transition: all 0.3s var(--ease-out-expo);
-        }
-        .hdr-user-pill:hover {
-          background: var(--border-subtle);
-          border-color: var(--border-strong);
-        }
-        .hdr-role-badge {
-          font-size: 0.75rem;
-          font-weight: 600;
-          letter-spacing: 0.05em;
-          text-transform: capitalize;
-          padding: 4px 12px;
-          border-radius: 100px;
-        }
-        .hdr-role-admin {
-          background: rgba(212, 175, 55, 0.15);
-          color: var(--gold-400);
-          border: 1px solid rgba(212, 175, 55, 0.3);
-        }
-        .hdr-role-member {
-          background: rgba(96, 165, 250, 0.15);
-          color: #93C5FD;
-          border: 1px solid rgba(96, 165, 250, 0.3);
-        }
-        .hdr-role-user {
-          background: var(--bg-surface);
-          color: var(--text-primary);
-          border: 1px solid var(--border-strong);
-        }
-        .site-header.top .hdr-signout {
-          color: rgba(255,255,255,0.7);
-        }
-        .site-header.top .hdr-signout:hover {
-          color: #fff;
-        }
-        .hdr-signout {
-          padding: 6px 16px;
-          border-radius: 100px;
-          background: transparent;
-          border: 1px solid transparent;
+          padding: 10px 12px;
+          border-radius: 10px;
           color: var(--text-secondary);
-          font-size: 0.85rem;
+          text-decoration: none;
+          font-size: 0.9rem;
           font-weight: 500;
+          background: transparent;
+          border: none;
+          width: 100%;
+          text-align: left;
           cursor: pointer;
-          transition: all 0.3s var(--ease-snappy);
+          transition: all 0.2s ease;
         }
-        .hdr-signout:hover {
-          background: var(--bg-surface);
-          border-color: var(--border-strong);
+        .hdr-dropdown-item:hover {
+          background: var(--border-subtle);
           color: var(--text-primary);
         }
-        .hdr-signin {
-          display: inline-flex;
-          align-items: center;
-          gap: 8px;
-          padding: 8px 20px;
-          border-radius: 100px;
-          background: var(--gold-500);
-          color: #000;
-          font-size: 0.85rem;
-          font-weight: 600;
-          text-decoration: none;
-          transition: all 0.3s var(--ease-spring);
-          box-shadow: 0 4px 15px rgba(212, 175, 55, 0.2);
+        .hdr-dropdown-item svg {
+          width: 18px;
+          height: 18px;
+          color: var(--text-secondary);
+          transition: color 0.2s ease;
         }
-        .hdr-signin:hover {
-          background: var(--gold-400);
-          transform: translateY(-2px);
-          box-shadow: 0 6px 20px rgba(212, 175, 55, 0.4);
+        .hdr-dropdown-item:hover svg {
+          color: var(--gold-500);
+        }
+        .hdr-dropdown-item.theme-toggle-row {
+          justify-content: space-between;
+          cursor: default;
+        }
+        .hdr-dropdown-item.theme-toggle-row:hover {
+          background: transparent;
+          color: var(--text-secondary);
+        }
+        .theme-toggle-label {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+        .theme-switch {
+          position: relative;
+          display: inline-block;
+          width: 42px;
+          height: 22px;
+          cursor: pointer;
+        }
+        .theme-switch input {
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+        .theme-slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: var(--border-strong);
+          transition: .3s;
+          border-radius: 22px;
+        }
+        .theme-slider:before {
+          position: absolute;
+          content: "";
+          height: 16px;
+          width: 16px;
+          left: 3px;
+          bottom: 3px;
+          background-color: white;
+          transition: .3s;
+          border-radius: 50%;
+        }
+        input:checked + .theme-slider {
+          background-color: var(--gold-500);
+        }
+        input:checked + .theme-slider:before {
+          transform: translateX(20px);
         }
       `}} />
 
@@ -304,25 +424,87 @@ export default function Header() {
 
           {/* User area */}
           <div className="hdr-actions">
-            <ThemeToggle />
-            {user ? (
-              <div className="hdr-user-pill">
-                <span className={`hdr-role-badge ${
-                  user.role === 'admin' ? 'hdr-role-admin'
-                  : user.role === 'member' ? 'hdr-role-member'
-                  : 'hdr-role-user'
-                }`}>
-                  {user.role}
-                </span>
-                <button className="hdr-signout" onClick={handleLogout}>
-                  Sign out
-                </button>
-              </div>
-            ) : (
-              <Link href="/login" className="hdr-signin">
-                Sign In
-              </Link>
-            )}
+            <div className="hdr-user-dropdown-container" ref={dropdownRef}>
+              <button 
+                className={`hdr-user-btn ${dropdownOpen ? 'active' : ''}`}
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                aria-label="User Menu"
+              >
+                <User className="w-5 h-5" />
+              </button>
+
+              {dropdownOpen && (
+                <div className="hdr-dropdown-menu">
+                  {user ? (
+                    <>
+                      <div className="hdr-dropdown-header">
+                        <span className="hdr-dropdown-username" title={user.full_name || user.email}>
+                          {user.full_name || user.email}
+                        </span>
+                        <span className="hdr-dropdown-role">
+                          {user.role}
+                        </span>
+                      </div>
+                      <Link 
+                        href="/account/bookings" 
+                        className="hdr-dropdown-item"
+                        onClick={() => setDropdownOpen(false)}
+                      >
+                        <Ticket className="w-4 h-4" />
+                        <span>My Tickets</span>
+                      </Link>
+                    </>
+                  ) : (
+                    <Link 
+                      href={currentUrl} 
+                      className="hdr-dropdown-item"
+                      onClick={() => setDropdownOpen(false)}
+                    >
+                      <LogIn className="w-4 h-4" />
+                      <span>Sign In</span>
+                    </Link>
+                  )}
+
+                  <div className="hdr-dropdown-item theme-toggle-row">
+                    <span className="theme-toggle-label">
+                      {mounted && theme === 'dark' ? (
+                        <>
+                          <Moon className="w-4 h-4 text-gold-500" />
+                          <span>Dark Mode</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sun className="w-4 h-4 text-slate-700 dark:text-slate-300" />
+                          <span>Light Mode</span>
+                        </>
+                      )}
+                    </span>
+                    <label className="theme-switch">
+                      <input 
+                        type="checkbox" 
+                        checked={mounted && theme === 'dark'} 
+                        onChange={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                      />
+                      <span className="theme-slider"></span>
+                    </label>
+                  </div>
+
+                  {user && (
+                    <button 
+                      className="hdr-dropdown-item" 
+                      onClick={() => {
+                        handleLogout();
+                        setDropdownOpen(false);
+                      }}
+                      style={{ borderTop: '1px solid var(--border-subtle)', borderRadius: '0 0 10px 10px', marginTop: '4px', paddingTop: '12px' }}
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>Sign Out</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
         </div>

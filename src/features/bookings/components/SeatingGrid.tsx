@@ -124,8 +124,8 @@ export default function SeatingGrid({ sortedRows, rowsMap, show, selectedSeats, 
   let shownPriceHeader = false;
 
   return (
-    <div style={{ overflowX: 'auto', width: '100%', display: 'flex', justifyContent: 'center', paddingBottom: '20px', zIndex: 2 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 'fit-content' }}>
+    <div className="seating-grid-container">
+      <div className="seating-grid-inner">
 
         {/* Price category header (shown once) */}
         {(() => {

@@ -33,6 +33,29 @@ export default function Footer() {
           .footer-grid {
             grid-template-columns: 1fr;
             gap: 40px;
+            text-align: center;
+          }
+          .footer-brand-name {
+            justify-content: center;
+          }
+          .footer-desc {
+            margin-left: auto;
+            margin-right: auto;
+          }
+          .footer-social {
+            justify-content: center;
+          }
+          .footer-link {
+            justify-content: center;
+          }
+          .footer-bottom {
+            flex-direction: column;
+            text-align: center;
+            align-items: center;
+          }
+          .footer-copy span {
+            display: block;
+            margin-top: 4px;
           }
         }
         .footer-brand-name {
@@ -167,7 +190,7 @@ export default function Footer() {
 
             {/* Contact Column */}
             <div>
-              <h3 className="footer-col-title">Visit Us</h3>
+              <h3 className="footer-col-title">Contact Us</h3>
               <div className="footer-links">
                 <span className="footer-link">
                   <span className="link-icon">📍</span>

@@ -160,12 +160,12 @@
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          padding: 18px 42px;
-          border-radius: 4px;
+          padding: 14px 36px;
+          border-radius: 8px;
           font-family: var(--font-heading);
           font-weight: 600;
-          font-size: 0.95rem;
-          letter-spacing: 0.15em;
+          font-size: 0.9rem;
+          letter-spacing: 0.12em;
           text-transform: uppercase;
           transition: all 0.5s var(--ease-snappy);
           text-decoration: none;
@@ -478,60 +478,7 @@
           font-size: 0.95rem;
         }
 
-        /* ── MOBILE RESPONSIVENESS ── */
-        @media (max-width: 768px) {
-          .premium-title {
-            font-size: clamp(2.5rem, 12vw, 4rem);
-            margin-bottom: 16px;
-          }
-          .premium-meta {
-            flex-wrap: wrap;
-            gap: 12px;
-            font-size: 0.85rem;
-          }
-          .premium-synopsis {
-            font-size: 0.95rem;
-            margin-bottom: 32px;
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-          }
-          .premium-actions {
-            flex-direction: column;
-            width: 100%;
-            gap: 12px;
-          }
-          .btn-premium {
-            width: 100%;
-          }
-          .section-header {
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 16px;
-            margin-bottom: 32px;
-          }
-          .premium-poster {
-            width: clamp(180px, 65vw, 280px);
-          }
-          .experience-section {
-            padding: 60px 0;
-          }
-          .exp-grid {
-            margin-top: 40px;
-            grid-template-columns: 1fr;
-          }
-          .exp-card {
-            padding: 30px 20px;
-          }
-          .culinary-content, .location-container {
-            grid-template-columns: 1fr;
-            gap: 40px;
-          }
-          .map-wrapper {
-            height: 350px;
-          }
-        }
+        /* Media queries moved to the end of the file to prevent override issues */
 
         /* Upcoming Section */
         .upcoming-section {
@@ -549,6 +496,9 @@
         }
 
         .upcoming-card {
+          flex: 0 0 auto;
+          width: clamp(240px, 22vw, 320px);
+          scroll-snap-align: start;
           position: relative;
           border-radius: 8px;
           overflow: hidden;
@@ -734,4 +684,90 @@
         html.dark .map-wrapper iframe {
           /* Magic dark mode filter for Google Maps */
           filter: invert(90%) hue-rotate(180deg) brightness(85%) contrast(120%);
+        }
+
+        /* ── MOBILE RESPONSIVENESS ── */
+        @media (max-width: 768px) {
+          .premium-title {
+            font-size: clamp(2.5rem, 12vw, 4rem);
+            margin-bottom: 16px;
+          }
+          .premium-meta {
+            flex-wrap: wrap;
+            gap: 12px;
+            font-size: 0.85rem;
+          }
+          .premium-synopsis {
+            font-size: 0.95rem;
+            margin-bottom: 32px;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+          }
+          .premium-actions {
+            flex-direction: row;
+            width: 100%;
+            max-width: 420px;
+            gap: 12px;
+            margin: 0 auto;
+          }
+          .btn-premium {
+            flex: 1;
+            padding: 12px 16px;
+            font-size: 0.8rem;
+            letter-spacing: 0.08em;
+          }
+          .section-header {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 24px;
+          }
+          .premium-poster {
+            width: clamp(180px, 65vw, 280px);
+          }
+          .upcoming-card {
+            width: clamp(180px, 65vw, 280px);
+          }
+          .rail-section {
+            padding: 40px 0;
+          }
+          .upcoming-section {
+            padding: 40px 0;
+          }
+          .experience-section {
+            padding: 48px 0;
+          }
+          .culinary-section {
+            padding: 48px 0;
+          }
+          .location-section {
+            padding: 48px 0;
+          }
+          .location-info {
+            text-align: center;
+          }
+          .exp-grid {
+            margin-top: 32px;
+            grid-template-columns: 1fr;
+          }
+          .exp-card {
+            padding: 30px 20px;
+          }
+          .culinary-content, .location-container {
+            grid-template-columns: 1fr;
+            gap: 32px;
+          }
+          .culinary-grid {
+            grid-template-columns: 1fr;
+            gap: 20px;
+          }
+          .culinary-item {
+            transform: none !important;
+            aspect-ratio: 16/9;
+          }
+          .map-wrapper {
+            height: 350px;
+          }
         }

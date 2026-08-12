@@ -195,9 +195,10 @@ export class MockDatabase implements DatabaseClient {
       // Screen 1 Mix
       showTimes1.forEach((time, index) => {
         let movieId = m1; // Default
-        if (dateIndex === 0) movieId = index % 2 === 0 ? m1 : m4;
-        if (dateIndex === 1) movieId = index % 2 === 0 ? m3 : m1;
-        if (dateIndex === 2) movieId = index % 2 === 0 ? m4 : m5;
+        if (index === 0) movieId = m1;
+        else if (index === 1) movieId = m2;
+        else if (index === 2) movieId = m3;
+        else if (index === 3) movieId = m4;
 
         const id = `show-s1-${date}-${time.replace(/:/g, '-')}`;
         this.shows.set(id, {
@@ -230,9 +231,10 @@ export class MockDatabase implements DatabaseClient {
       // Screen 2 Mix
       showTimes2.forEach((time, index) => {
         let movieId = m2; // Default
-        if (dateIndex === 0) movieId = index % 2 === 0 ? m2 : m6;
-        if (dateIndex === 1) movieId = index % 2 === 0 ? m6 : m2;
-        if (dateIndex === 2) movieId = index % 2 === 0 ? m5 : m6;
+        if (index === 0) movieId = m4;
+        else if (index === 1) movieId = m3;
+        else if (index === 2) movieId = m2;
+        else if (index === 3) movieId = m1;
 
         const id = `show-s2-${date}-${time.replace(/:/g, '-')}`;
         this.shows.set(id, {

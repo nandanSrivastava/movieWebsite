@@ -7,6 +7,7 @@ import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
 import HeroCarousel from '@/features/movies/components/HeroCarousel';
 import MovieCarousel from '@/features/movies/components/MovieCarousel';
+import UpcomingCarousel from '@/features/movies/components/UpcomingCarousel';
 
 export const revalidate = 60;
 
@@ -61,17 +62,7 @@ export default async function Home() {
                   <h2 className="section-title">Anticipated Premieres</h2>
                 </div>
               </div>
-              <div className="upcoming-grid">
-                {upcomingMovies.map((movie, i) => (
-                  <div key={i} className="upcoming-card">
-                    <Image src={movie.poster} alt={movie.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
-                    <div className="upcoming-info">
-                      <span className="upcoming-date">{movie.date}</span>
-                      <h3 className="upcoming-title">{movie.title}</h3>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <UpcomingCarousel movies={upcomingMovies} />
             </div>
           </section>
 

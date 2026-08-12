@@ -56,9 +56,12 @@ export default function HeroCarousel({ movies }: { movies: any[] }) {
                 position: isActive ? 'relative' : 'absolute',
                 top: 0,
                 opacity: isActive ? 1 : 0,
+                visibility: isActive ? 'visible' : 'hidden',
                 transform: isActive ? 'scale(1) translateY(0)' : 'scale(0.95) translateY(20px)',
                 transformOrigin: 'center center',
-                transition: 'opacity 0.8s var(--ease-out-expo), transform 0.8s var(--ease-snappy)',
+                transition: isActive
+                  ? 'opacity 0.6s var(--ease-out-expo) 0.3s, transform 0.6s var(--ease-snappy) 0.3s, visibility 0.6s 0.3s'
+                  : 'opacity 0.3s var(--ease-out-expo), transform 0.3s var(--ease-snappy), visibility 0.3s',
                 pointerEvents: isActive ? 'auto' : 'none'
               }}
             >
