@@ -70,28 +70,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized session' }, { status: 401 });
     }
 
-    // 2.5. Verify Show is not in the past
+    // 2.5. Verify Show is not in the past.
+    // show_date is "YYYY-MM-DD" and show_time is "HH:mm" (theater local time = IST).
+    // Parse with the explicit IST offset so the comparison is correct even when the
+    // server runs in UTC (e.g. Vercel) — a bare `new Date('YYYY-MM-DDTHH:mm')` would
+    // be interpreted in server-local time and wrongly allow/block bookings.
     const show = await db.getShowById(showId);
     if (!show) {
       return NextResponse.json({ error: 'Show not found' }, { status: 404 });
     }
-    
-    // show_date is usually "YYYY-MM-DD" and show_time is "HH:mm"
-    const showDateTime = new Date(`${show.show_date}T${show.show_time}:00Z`);
-    // Assuming the timezone is handled, or we just compare with now (maybe with some offset).
-    // Let's parse it safely
-    let isPast = false;
-    try {
-      const showDateStr = `${show.show_date}T${show.show_time}`;
-      const showDateObj = new Date(showDateStr);
-      if (showDateObj.getTime() < Date.now()) {
-        isPast = true;
-      }
-    } catch(e) {
-      // fallback
+    const showDateTime = new Date(`${show.show_date}T${show.show_time}+05:30`);
+    if (isNaN(showDateTime.getTime())) {
+      return NextResponse.json({ error: 'Invalid show date/time' }, { status: 400 });
     }
-
-    if (isPast) {
+    if (showDateTime.getTime() < Date.now()) {
       return NextResponse.json({ error: 'Cannot book seats for a show that has already started or is in the past.' }, { status: 400 });
     }
 

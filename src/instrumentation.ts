@@ -1,19 +1,12 @@
-import * as Sentry from '@sentry/nextjs';
-
-export function register() {
+// Standard @sentry/nextjs instrumentation: load the per-runtime config files.
+// (The SDK also auto-loads these; importing here is the documented pattern and
+// avoids double-initializing Sentry with duplicate init() calls.)
+export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    Sentry.init({
-      dsn: process.env.NEXT_PUBLIC_SENTRY_DSN || "",
-      tracesSampleRate: 0.1,
-      debug: false,
-    });
+    await import('../sentry.server.config');
   }
 
   if (process.env.NEXT_RUNTIME === 'edge') {
-    Sentry.init({
-      dsn: process.env.NEXT_PUBLIC_SENTRY_DSN || "",
-      tracesSampleRate: 0.1,
-      debug: false,
-    });
+    await import('../sentry.edge.config');
   }
 }

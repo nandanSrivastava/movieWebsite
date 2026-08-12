@@ -5,8 +5,7 @@ const config: CapacitorConfig = {
   appName: 'CineBook',
   webDir: 'public',
   server: {
-    url: 'https://dhrub-talkies.vercel.app', // Deployed app URL
-    cleartext: true
+    url: 'https://dhrub-talkies.vercel.app' // Deployed app URL (HTTPS — keep cleartext disabled)
   }
 };
 

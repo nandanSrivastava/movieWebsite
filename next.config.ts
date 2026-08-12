@@ -37,8 +37,11 @@ export default withSentryConfig(nextConfig, {
   // For all available options, see:
   // https://github.com/getsentry/sentry-webpack-plugin#options
 
-  org: "your-org-name",
-  project: "dhrub-talkies",
+  // IMPORTANT: set SENTRY_ORG (and SENTRY_PROJECT if different) in your deploy
+  // environment or .sentryclirc. With SENTRY_AUTH_TOKEN set in CI, sourcemap
+  // uploads will FAIL against a placeholder org.
+  org: process.env.SENTRY_ORG || "",
+  project: process.env.SENTRY_PROJECT || "dhrub-talkies",
 
   // Only print logs for uploading source maps in CI
   silent: !process.env.CI,
