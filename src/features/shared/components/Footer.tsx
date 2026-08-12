@@ -39,7 +39,7 @@ export default function Footer() {
           font-family: var(--font-playfair);
           font-size: 1.5rem;
           font-weight: 700;
-          color: #fff;
+          color: var(--text-primary);
           display: flex;
           align-items: center;
           gap: 10px;
@@ -56,7 +56,7 @@ export default function Footer() {
         .footer-desc {
           font-size: 0.9rem;
           line-height: 1.75;
-          color: rgba(255,255,255,0.7);
+          color: var(--text-secondary);
           max-width: 320px;
           margin-bottom: 28px;
         }
@@ -88,7 +88,7 @@ export default function Footer() {
           font-weight: 700;
           letter-spacing: 0.12em;
           text-transform: uppercase;
-          color: rgba(255,255,255,0.7);
+          color: var(--text-secondary);
           margin-bottom: 20px;
         }
         .footer-links {
@@ -98,7 +98,7 @@ export default function Footer() {
         }
         .footer-link {
           font-size: 0.9rem;
-          color: rgba(255,255,255,0.7);
+          color: var(--text-secondary);
           text-decoration: none;
           transition: color 0.2s ease;
           display: flex;
@@ -122,7 +122,7 @@ export default function Footer() {
         }
         .footer-copy {
           font-size: 0.8rem;
-          color: rgba(255,255,255,0.6);
+          color: var(--text-muted);
         }
         .footer-copy span { color: rgba(255, 184, 0, 0.8); }
         .footer-legal {
@@ -131,11 +131,11 @@ export default function Footer() {
         }
         .footer-legal a {
           font-size: 0.8rem;
-          color: rgba(255,255,255,0.6);
+          color: var(--text-muted);
           text-decoration: none;
           transition: color 0.2s ease;
         }
-        .footer-legal a:hover { color: rgba(255,255,255,0.55); }
+        .footer-legal a:hover { color: var(--text-secondary); }
       `}} />
 
       <footer className="site-footer">

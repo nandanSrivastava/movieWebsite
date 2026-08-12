@@ -5,17 +5,24 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
+import { ThemeToggle } from '@/features/shared/components/ThemeToggle';
 
 export default function Header() {
   const pathname = usePathname();
   const { user, signOut } = useCineBookAuth();
-  const [scrolled, setScrolled] = useState(false);
+  const isHome = pathname === '/';
+  const [scrolled, setScrolled] = useState(!isHome);
 
   useEffect(() => {
+    if (!isHome) {
+      setScrolled(true);
+      return;
+    }
     const onScroll = () => setScrolled(window.scrollY > 40);
+    onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
-  }, []);
+  }, [isHome]);
 
   const handleLogout = async () => {
     try { await signOut(); } catch (e) { console.error(e); }
@@ -39,11 +46,11 @@ export default function Header() {
           align-items: center;
           transition: transform 0.5s var(--ease-smooth), background-color 0.4s var(--ease-out-expo), border-color 0.4s var(--ease-out-expo), box-shadow 0.4s var(--ease-out-expo);
           border-radius: 24px;
-          background: rgba(10, 16, 36, 0.65);
+          background: var(--bg-glass);
           backdrop-filter: blur(16px) saturate(180%);
           -webkit-backdrop-filter: blur(16px) saturate(180%);
-          border: 1px solid rgba(255,255,255,0.06);
-          box-shadow: 0 4px 30px rgba(0,0,0,0.3);
+          border: 1px solid var(--border-subtle);
+          box-shadow: 0 4px 30px rgba(0,0,0,0.1);
         }
         @media (max-width: 768px) {
           .site-header {
@@ -53,9 +60,9 @@ export default function Header() {
           }
         }
         .site-header.scrolled {
-          background: rgba(5, 8, 20, 0.85);
-          border-color: rgba(255, 255, 255, 0.1);
-          box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+          background: var(--bg-elevated);
+          border-color: var(--border-default);
+          box-shadow: var(--shadow-md);
           transform: translateX(-50%) translateY(-12px);
           width: calc(100% - 24px);
         }
@@ -105,11 +112,14 @@ export default function Header() {
           flex-direction: column;
           line-height: 1;
         }
+        .site-header.top .hdr-logo-name {
+          color: #fff;
+        }
         .hdr-logo-name {
           font-family: var(--font-playfair);
           font-size: 1.25rem;
           font-weight: 700;
-          color: #fff;
+          color: var(--text-primary);
           letter-spacing: -0.01em;
         }
         .hdr-logo-name span {
@@ -120,7 +130,7 @@ export default function Header() {
           font-weight: 600;
           letter-spacing: 0.18em;
           text-transform: uppercase;
-          color: rgba(255,255,255,0.7);
+          color: var(--text-secondary);
           margin-top: 1px;
         }
 
@@ -133,10 +143,17 @@ export default function Header() {
           left: 50%;
           transform: translateX(-50%);
         }
+        .site-header.top .hdr-nav-link {
+          color: rgba(255,255,255,0.8);
+        }
+        .site-header.top .hdr-nav-link:hover,
+        .site-header.top .hdr-nav-link.active {
+          color: #fff;
+        }
         .hdr-nav-link {
           font-size: 0.92rem;
           font-weight: 500;
-          color: rgba(255,255,255,0.65);
+          color: var(--text-secondary);
           text-decoration: none;
           letter-spacing: 0.01em;
           padding: 4px 0;
@@ -156,7 +173,7 @@ export default function Header() {
         }
         .hdr-nav-link:hover,
         .hdr-nav-link.active {
-          color: #fff;
+          color: var(--text-primary);
         }
         .hdr-nav-link:hover::after,
         .hdr-nav-link.active::after {
@@ -169,19 +186,27 @@ export default function Header() {
           align-items: center;
           gap: 16px;
         }
+        .site-header.top .hdr-user-pill {
+          background: rgba(255,255,255,0.03);
+          border-color: rgba(255,255,255,0.08);
+        }
+        .site-header.top .hdr-user-pill:hover {
+          background: rgba(255,255,255,0.08);
+          border-color: rgba(255,255,255,0.15);
+        }
         .hdr-user-pill {
           display: flex;
           align-items: center;
           gap: 12px;
           padding: 6px 8px 6px 16px;
-          background: rgba(255,255,255,0.03);
-          border: 1px solid rgba(255,255,255,0.08);
+          background: var(--bg-surface);
+          border: 1px solid var(--border-default);
           border-radius: 100px;
           transition: all 0.3s var(--ease-out-expo);
         }
         .hdr-user-pill:hover {
-          background: rgba(255,255,255,0.06);
-          border-color: rgba(255,255,255,0.12);
+          background: var(--border-subtle);
+          border-color: var(--border-strong);
         }
         .hdr-role-badge {
           font-size: 0.75rem;
@@ -202,25 +227,31 @@ export default function Header() {
           border: 1px solid rgba(96, 165, 250, 0.3);
         }
         .hdr-role-user {
-          background: rgba(255, 255, 255, 0.1);
-          color: rgba(255,255,255,0.8);
-          border: 1px solid rgba(255,255,255,0.15);
+          background: var(--bg-surface);
+          color: var(--text-primary);
+          border: 1px solid var(--border-strong);
+        }
+        .site-header.top .hdr-signout {
+          color: rgba(255,255,255,0.7);
+        }
+        .site-header.top .hdr-signout:hover {
+          color: #fff;
         }
         .hdr-signout {
           padding: 6px 16px;
           border-radius: 100px;
           background: transparent;
           border: 1px solid transparent;
-          color: rgba(255,255,255,0.7);
+          color: var(--text-secondary);
           font-size: 0.85rem;
           font-weight: 500;
           cursor: pointer;
           transition: all 0.3s var(--ease-snappy);
         }
         .hdr-signout:hover {
-          background: rgba(255,255,255,0.08);
-          border-color: rgba(255,255,255,0.15);
-          color: #fff;
+          background: var(--bg-surface);
+          border-color: var(--border-strong);
+          color: var(--text-primary);
         }
         .hdr-signin {
           display: inline-flex;
@@ -273,6 +304,7 @@ export default function Header() {
 
           {/* User area */}
           <div className="hdr-actions">
+            <ThemeToggle />
             {user ? (
               <div className="hdr-user-pill">
                 <span className={`hdr-role-badge ${

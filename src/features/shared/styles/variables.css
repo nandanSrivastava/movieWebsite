@@ -121,3 +121,58 @@
   --transition-normal: var(--t-normal);
   --transition-slow:   var(--t-slow);
 }
+
+/* ── LIGHT THEME OVERRIDES ────────────────────────────── */
+.light {
+  /* Backgrounds: Brighter, off-white to make it feel fresh */
+  --bg-void:       #F8F9FA;
+  --bg-primary:    #FFFFFF;
+  --bg-secondary:  #F1F3F5;
+  --bg-elevated:   #E9ECEF;
+  --bg-card:       #FFFFFF;
+  --bg-card-hover: #F8F9FA;
+  --bg-surface:    rgba(0,0,0,0.03);
+  --bg-glass:      rgba(255, 255, 255, 0.7);
+  --bg-tertiary:   #DEE2E6;
+
+  /* Gold/Amber can stay mostly the same or be adjusted for contrast */
+  /* We might want a darker amber for text on light backgrounds */
+  --gold-glow: rgba(250, 160, 0, 0.15);
+  --gold-glow-strong: rgba(250, 160, 0, 0.3);
+
+  --crimson:       #D9480F; /* slightly darker for better contrast */
+  --crimson-hover: #F06E00;
+  --crimson-glow:  rgba(217, 72, 15, 0.2);
+
+  /* Text hierarchy for light mode */
+  --text-primary:   #212529;
+  --text-secondary: #495057;
+  --text-muted:     #868E96;
+  --text-disabled:  #ADB5BD;
+
+  /* Borders */
+  --border-subtle:  rgba(0, 0, 0, 0.05);
+  --border-default: rgba(0, 0, 0, 0.1);
+  --border-strong:  rgba(0, 0, 0, 0.15);
+  --border-gold:    rgba(250, 160, 0, 0.3);
+  --border-crimson: rgba(217, 72, 15, 0.3);
+
+  /* Seat Status (Light mode inverted) */
+  --seat-available:        #FFFFFF;
+  --seat-available-border: #CED4DA;
+  --seat-locked:           #FFE3E3;
+  --seat-locked-border:    #FFA8A8;
+  --seat-booked:           #E9ECEF;
+  --seat-booked-border:    #CED4DA;
+  --seat-selected:         var(--gold-500);
+  --seat-selected-border:  #D68A00;
+
+  --category-normal:   #495057;
+  --category-premium:  #1C7ED6;
+  
+  /* Update shadow colors for light mode */
+  --shadow-sm:  0 2px 4px rgba(0,0,0,0.05);
+  --shadow-md:  0 8px 24px rgba(0,0,0,0.08);
+  --shadow-lg:  0 16px 48px rgba(0,0,0,0.12);
+  --shadow-xl:  0 30px 80px rgba(0,0,0,0.15);
+}

@@ -402,16 +402,16 @@ body::before {
 .no-scroll { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* ── NAV LINK ───────────────────────────────────────────── */
-.nav-link {
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: rgba(255,255,255,0.75);
-  text-decoration: none;
-  padding: 6px 2px;
-  position: relative;
-  transition: color 0.2s ease;
-  letter-spacing: 0.01em;
-}
+        .nav-link {
+          font-size: 0.95rem;
+          font-weight: 500;
+          color: var(--text-secondary);
+          text-decoration: none;
+          padding: 6px 2px;
+          position: relative;
+          transition: color 0.2s ease;
+          letter-spacing: 0.01em;
+        }
 .nav-link::after {
   content: '';
   position: absolute;
@@ -422,10 +422,10 @@ body::before {
   background: var(--gold-500);
   transition: width 0.25s ease;
 }
-.nav-link:hover,
-.nav-link.active {
-  color: #fff;
-}
+        .nav-link:hover,
+        .nav-link.active {
+          color: var(--text-primary);
+        }
 .nav-link:hover::after,
 .nav-link.active::after {
   width: 100%;

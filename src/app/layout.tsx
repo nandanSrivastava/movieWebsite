@@ -6,6 +6,7 @@ import { AuthProvider } from "@/features/auth/context/AuthContext";
 import MockAuthSwitcher from "@/features/auth/components/MockAuthSwitcher";
 import { QueryProvider } from "@/features/shared/components/QueryProvider";
 import { Cinzel, Inter, Outfit, Playfair_Display } from "next/font/google";
+import { ThemeProvider } from "@/features/shared/components/ThemeProvider";
 
 const cinzel = Cinzel({ 
   subsets: ["latin"],
@@ -88,20 +89,22 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark scroll-smooth">
+    <html lang="en" className="scroll-smooth" suppressHydrationWarning>
       <head>
       </head>
       <body className={`antialiased min-h-screen bg-void text-primary selection:bg-gold-500/30 selection:text-gold-200 ${cinzel.variable} ${inter.variable} ${outfit.variable} ${playfair.variable}`}>
-        <ErrorBoundary>
-          <QueryProvider>
-            <ToastProvider>
-              <AuthProvider>
-                {children}
-                <MockAuthSwitcher />
-              </AuthProvider>
-            </ToastProvider>
-          </QueryProvider>
-        </ErrorBoundary>
+        <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
+          <ErrorBoundary>
+            <QueryProvider>
+              <ToastProvider>
+                <AuthProvider>
+                  {children}
+                  <MockAuthSwitcher />
+                </AuthProvider>
+              </ToastProvider>
+            </QueryProvider>
+          </ErrorBoundary>
+        </ThemeProvider>
       </body>
     </html>
   );
