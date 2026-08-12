@@ -7,6 +7,8 @@ import { useToast } from '@/features/shared/context/ToastContext';
 import BookingSummaryCard from '@/features/bookings/components/BookingSummaryCard';
 import CheckoutForm from '@/features/bookings/components/CheckoutForm';
 import MockGatewayModal from '@/features/bookings/components/MockGatewayModal';
+import { isMockMode } from '@/lib/config';
+import { supabase as supabaseClient } from '@/lib/supabaseClient';
 
 function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -65,9 +67,18 @@ export default function CheckoutClient({
     try {
       const idempotencyKey = generateUUID();
 
+      let token = '';
+      if (!isMockMode) {
+        const { data } = await supabaseClient.auth.getSession();
+        token = data.session?.access_token || '';
+      }
+
       const res = await fetch('/api/checkout/create-order', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify({
           showId,
           seatLayoutIds,
