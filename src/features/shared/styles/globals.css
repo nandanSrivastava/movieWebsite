@@ -31,6 +31,18 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  
+  /* Native App Feel */
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Re-enable selection for inputs */
+input, textarea, [contenteditable="true"] {
+  user-select: auto;
+  -webkit-user-select: auto;
 }
 
 main { flex: 1; }

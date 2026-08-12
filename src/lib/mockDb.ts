@@ -208,8 +208,6 @@ export class MockDatabase implements DatabaseClient {
           show_time: time,
           price_classic: 150,
           price_premium: 200,
-          price_normal: 150,
-          price_recliner: 150,
           created_at: new Date().toISOString()
         });
         
@@ -245,8 +243,6 @@ export class MockDatabase implements DatabaseClient {
           show_time: time,
           price_classic: 150,
           price_premium: 200,
-          price_normal: 150,
-          price_recliner: 150,
           created_at: new Date().toISOString()
         });
 
@@ -320,7 +316,7 @@ export class MockDatabase implements DatabaseClient {
     const layouts: SeatLayout[] = [];
     const rowLabels = Array.from({ length: rows }, (_, i) => String.fromCharCode(65 + i));
     rowLabels.forEach((row) => {
-      let category: SeatLayout['category'] = 'normal';
+      let category: SeatLayout['category'] = 'classic';
       if (row >= 'E') category = 'premium';
       
       for (let num = 1; num <= seatsPerRow; num++) {

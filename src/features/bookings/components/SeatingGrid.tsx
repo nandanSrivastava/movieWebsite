@@ -153,8 +153,8 @@ export default function SeatingGrid({ sortedRows, rowsMap, show, selectedSeats, 
           let left: SeatStatusType[] = [];
           let centre: SeatStatusType[] = [];
           let right: SeatStatusType[] = [];
-          let metaLeft = { label: row, sublabel: undefined };
-          let metaRight = { label: row, sublabel: undefined };
+          let metaLeft: { label: string; sublabel?: string } = { label: row };
+          let metaRight: { label: string; sublabel?: string } = { label: row };
 
           if (row === 'A_center') {
             const seatsA = rowsMap['A'] || [];
@@ -179,7 +179,7 @@ export default function SeatingGrid({ sortedRows, rowsMap, show, selectedSeats, 
             if (!rowSeats || rowSeats.length === 0) return null;
             const split = splitRow(row, rowSeats);
             left = split.left; centre = split.centre; right = split.right;
-            metaLeft = ROW_META[row] || { label: row, sublabel: undefined };
+            metaLeft = ROW_META[row] || { label: row };
             metaRight = metaLeft;
           }
 
