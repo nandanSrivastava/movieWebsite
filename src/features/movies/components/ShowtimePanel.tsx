@@ -8,6 +8,16 @@ interface ShowtimePanelProps {
   shows: ShowType[];
 }
 
+const isShowInPast = (showDate: string, showTime: string) => {
+  try {
+    // Parse with IST offset (+05:30)
+    const showDateTime = new Date(`${showDate}T${showTime}+05:30`);
+    return showDateTime.getTime() < Date.now();
+  } catch {
+    return false;
+  }
+};
+
 export default function ShowtimePanel({ shows }: ShowtimePanelProps) {
   // Get unique dates from shows
   const uniqueDates = Array.from(new Set(shows.map((s) => s.show_date))).sort();
@@ -161,41 +171,72 @@ export default function ShowtimePanel({ shows }: ShowtimePanelProps) {
               flexWrap: 'wrap',
               gap: '14px'
             }}>
-              {screenShows.map((show) => (
-                <Link
-                  key={show.id}
-                  href={`/booking/${show.id}`}
-                  style={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    borderRadius: '8px',
-                    padding: '14px 24px',
-                    fontSize: '0.9rem',
-                    color: '#FFFFFF',
-                    fontWeight: 700,
-                    textDecoration: 'none',
-                    textAlign: 'center',
-                    minWidth: '110px',
-                    transition: 'all 0.15s cubic-bezier(0.165, 0.84, 0.44, 1)'
-                  }}
-                  onMouseOver={(e) => {
-                    e.currentTarget.style.borderColor = 'var(--highlight-gold)';
-                    e.currentTarget.style.color = 'var(--highlight-gold)';
-                    e.currentTarget.style.backgroundColor = 'rgba(212, 175, 55, 0.05)';
-                    e.currentTarget.style.transform = 'translateY(-2px)';
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(212, 175, 55, 0.1)';
-                  }}
-                  onMouseOut={(e) => {
-                    e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-                    e.currentTarget.style.color = '#FFFFFF';
-                    e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                >
-                  {formatTimeLabel(show.show_time)}
-                </Link>
-              ))}
+              {screenShows.map((show) => {
+                const past = isShowInPast(show.show_date, show.show_time);
+                if (past) {
+                  return (
+                    <div
+                      key={show.id}
+                      style={{
+                        backgroundColor: 'rgba(255, 255, 255, 0.01)',
+                        border: '1px solid rgba(255, 255, 255, 0.03)',
+                        borderRadius: '8px',
+                        padding: '10px 20px',
+                        fontSize: '0.85rem',
+                        color: 'var(--text-muted)',
+                        fontWeight: 700,
+                        textAlign: 'center',
+                        minWidth: '110px',
+                        cursor: 'not-allowed',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        opacity: 0.35
+                      }}
+                    >
+                      <span style={{ textDecoration: 'line-through' }}>{formatTimeLabel(show.show_time)}</span>
+                      <span style={{ fontSize: '0.6rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: '2px', letterSpacing: '0.5px' }}>Passed</span>
+                    </div>
+                  );
+                }
+
+                return (
+                  <Link
+                    key={show.id}
+                    href={`/booking/${show.id}`}
+                    style={{
+                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.1)',
+                      borderRadius: '8px',
+                      padding: '14px 24px',
+                      fontSize: '0.9rem',
+                      color: '#FFFFFF',
+                      fontWeight: 700,
+                      textDecoration: 'none',
+                      textAlign: 'center',
+                      minWidth: '110px',
+                      transition: 'all 0.15s cubic-bezier(0.165, 0.84, 0.44, 1)'
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--highlight-gold)';
+                      e.currentTarget.style.color = 'var(--highlight-gold)';
+                      e.currentTarget.style.backgroundColor = 'rgba(212, 175, 55, 0.05)';
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(212, 175, 55, 0.1)';
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                      e.currentTarget.style.color = '#FFFFFF';
+                      e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = 'none';
+                    }}
+                  >
+                    {formatTimeLabel(show.show_time)}
+                  </Link>
+                );
+              })}
             </div>
           </div>
         ))}
