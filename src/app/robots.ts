@@ -7,6 +7,6 @@ export default function robots(): MetadataRoute.Robots {
       allow: '/',
       disallow: ['/admin/', '/api/', '/account/', '/booking/checkout', '/booking/confirmation'],
     },
-    sitemap: 'https://dhrubcineplex.com/sitemap.xml',
+    sitemap: 'https://dhrubcineplex.in/sitemap.xml',
   };
 }
