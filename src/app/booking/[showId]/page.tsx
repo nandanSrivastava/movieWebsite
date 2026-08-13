@@ -143,7 +143,7 @@ export default async function BookingPage({ params }: PageProps) {
             
             <div style={{ textAlign: 'right' }}>
               <p style={{ fontWeight: 800, fontSize: '1.15rem', color: 'var(--highlight-gold)' }}>
-                {show.screen?.name}
+                Dhrub Talkies
               </p>
               <p style={{ color: '#E5E7EB', fontSize: '0.95rem', marginTop: '4px', fontWeight: 500 }}>
                 📅 {formatDateLabel(show.show_date)}

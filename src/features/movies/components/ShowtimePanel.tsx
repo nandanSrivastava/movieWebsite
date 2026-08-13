@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Show as ShowType } from '@/lib/db';
 
@@ -10,8 +10,8 @@ interface ShowtimePanelProps {
 
 const isShowInPast = (showDate: string, showTime: string) => {
   try {
-    // Parse with IST offset (+05:30)
-    const showDateTime = new Date(`${showDate}T${showTime}+05:30`);
+    const formattedTime = showTime.length === 5 ? `${showTime}:00` : showTime;
+    const showDateTime = new Date(`${showDate}T${formattedTime}+05:30`);
     return showDateTime.getTime() < Date.now();
   } catch {
     return false;
@@ -19,13 +19,23 @@ const isShowInPast = (showDate: string, showTime: string) => {
 };
 
 export default function ShowtimePanel({ shows }: ShowtimePanelProps) {
-  // Get unique dates from shows
-  const uniqueDates = Array.from(new Set(shows.map((s) => s.show_date))).sort();
+  // Only consider active upcoming shows (filter out passed showtimes)
+  const upcomingShows = shows.filter((s) => !isShowInPast(s.show_date, s.show_time));
+
+  // Get unique dates ONLY from upcoming shows
+  const uniqueDates = Array.from(new Set(upcomingShows.map((s) => s.show_date))).sort();
   
   // Set default selected date
   const [selectedDate, setSelectedDate] = useState<string>(uniqueDates[0] || '');
 
-  if (shows.length === 0) {
+  // Keep selectedDate synchronized if uniqueDates changes
+  useEffect(() => {
+    if (uniqueDates.length > 0 && !uniqueDates.includes(selectedDate)) {
+      setSelectedDate(uniqueDates[0]);
+    }
+  }, [uniqueDates, selectedDate]);
+
+  if (upcomingShows.length === 0) {
     return (
       <div style={{
         padding: '50px 30px',
@@ -35,7 +45,7 @@ export default function ShowtimePanel({ shows }: ShowtimePanelProps) {
         textAlign: 'center',
         color: '#9CA3AF'
       }}>
-        🎥 No shows currently scheduled for this movie. Please check back later.
+        🎥 No upcoming shows currently scheduled for this movie. Please check back later.
       </div>
     );
   }
@@ -43,7 +53,8 @@ export default function ShowtimePanel({ shows }: ShowtimePanelProps) {
   // Helper to format date string to "Mon, Aug 9"
   const formatDateLabel = (dateStr: string) => {
     try {
-      const date = new Date(dateStr);
+      const [year, month, day] = dateStr.split('-').map(Number);
+      const date = new Date(year, month - 1, day);
       const options: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' };
       return date.toLocaleDateString('en-US', options);
     } catch {
@@ -51,18 +62,10 @@ export default function ShowtimePanel({ shows }: ShowtimePanelProps) {
     }
   };
 
-  // Filter shows for selected date
-  const filteredShows = shows.filter((s) => s.show_date === selectedDate);
-
-  // Group shows by screen
-  const showsByScreen: Record<string, ShowType[]> = {};
-  filteredShows.forEach((show) => {
-    const screenName = show.screen?.name || 'Standard Screen';
-    if (!showsByScreen[screenName]) {
-      showsByScreen[screenName] = [];
-    }
-    showsByScreen[screenName].push(show);
-  });
+  // Filter shows for selected date and sort chronologically by time
+  const filteredShows = upcomingShows
+    .filter((s) => s.show_date === selectedDate)
+    .sort((a, b) => a.show_time.localeCompare(b.show_time));
 
   // Helper to format time (e.g. "14:00:00" to "02:00 PM")
   const formatTimeLabel = (timeStr: string) => {
@@ -137,109 +140,73 @@ export default function ShowtimePanel({ shows }: ShowtimePanelProps) {
         })}
       </div>
 
-      {/* Grouped Showtimes */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-        {Object.entries(showsByScreen).map(([screenName, screenShows]) => (
-          <div 
-            key={screenName}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '20px',
-              padding: '24px 28px',
-              backgroundColor: '#0F121C',
-              borderRadius: '16px',
-              border: '1px solid rgba(255, 255, 255, 0.05)',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <span style={{ fontSize: '1.2rem' }}>🎬</span>
-              <h4 style={{
-                fontSize: '1.15rem',
-                fontWeight: 800,
-                color: 'var(--highlight-gold)',
-                fontFamily: 'var(--font-family-heading)',
-                margin: 0
-              }}>
-                {screenName}
-              </h4>
-            </div>
+      {/* Single Screen Showtimes Block */}
+      <div 
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '20px',
+          padding: '24px 28px',
+          backgroundColor: '#0F121C',
+          borderRadius: '16px',
+          border: '1px solid rgba(255, 255, 255, 0.05)',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <span style={{ fontSize: '1.2rem' }}>🎬</span>
+          <h4 style={{
+            fontSize: '1.15rem',
+            fontWeight: 800,
+            color: 'var(--highlight-gold)',
+            fontFamily: 'var(--font-family-heading)',
+            margin: 0
+          }}>
+            Dhrub Talkies
+          </h4>
+        </div>
 
-            <div style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '14px'
-            }}>
-              {screenShows.map((show) => {
-                const past = isShowInPast(show.show_date, show.show_time);
-                if (past) {
-                  return (
-                    <div
-                      key={show.id}
-                      style={{
-                        backgroundColor: 'rgba(255, 255, 255, 0.01)',
-                        border: '1px solid rgba(255, 255, 255, 0.03)',
-                        borderRadius: '8px',
-                        padding: '10px 20px',
-                        fontSize: '0.85rem',
-                        color: 'var(--text-muted)',
-                        fontWeight: 700,
-                        textAlign: 'center',
-                        minWidth: '110px',
-                        cursor: 'not-allowed',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        opacity: 0.35
-                      }}
-                    >
-                      <span style={{ textDecoration: 'line-through' }}>{formatTimeLabel(show.show_time)}</span>
-                      <span style={{ fontSize: '0.6rem', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: '2px', letterSpacing: '0.5px' }}>Passed</span>
-                    </div>
-                  );
-                }
-
-                return (
-                  <Link
-                    key={show.id}
-                    href={`/booking/${show.id}`}
-                    style={{
-                      backgroundColor: 'rgba(255, 255, 255, 0.03)',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                      borderRadius: '8px',
-                      padding: '14px 24px',
-                      fontSize: '0.9rem',
-                      color: '#FFFFFF',
-                      fontWeight: 700,
-                      textDecoration: 'none',
-                      textAlign: 'center',
-                      minWidth: '110px',
-                      transition: 'all 0.15s cubic-bezier(0.165, 0.84, 0.44, 1)'
-                    }}
-                    onMouseOver={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--highlight-gold)';
-                      e.currentTarget.style.color = 'var(--highlight-gold)';
-                      e.currentTarget.style.backgroundColor = 'rgba(212, 175, 55, 0.05)';
-                      e.currentTarget.style.transform = 'translateY(-2px)';
-                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(212, 175, 55, 0.1)';
-                    }}
-                    onMouseOut={(e) => {
-                      e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-                      e.currentTarget.style.color = '#FFFFFF';
-                      e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
-                      e.currentTarget.style.transform = 'translateY(0)';
-                      e.currentTarget.style.boxShadow = 'none';
-                    }}
-                  >
-                    {formatTimeLabel(show.show_time)}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '14px'
+        }}>
+          {filteredShows.map((show) => (
+            <Link
+              key={show.id}
+              href={`/booking/${show.id}`}
+              style={{
+                backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '8px',
+                padding: '14px 24px',
+                fontSize: '0.9rem',
+                color: '#FFFFFF',
+                fontWeight: 700,
+                textDecoration: 'none',
+                textAlign: 'center',
+                minWidth: '110px',
+                transition: 'all 0.15s cubic-bezier(0.165, 0.84, 0.44, 1)'
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.borderColor = 'var(--highlight-gold)';
+                e.currentTarget.style.color = 'var(--highlight-gold)';
+                e.currentTarget.style.backgroundColor = 'rgba(212, 175, 55, 0.05)';
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(212, 175, 55, 0.1)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+                e.currentTarget.style.color = '#FFFFFF';
+                e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.03)';
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              {formatTimeLabel(show.show_time)}
+            </Link>
+          ))}
+        </div>
       </div>
     </div>
   );

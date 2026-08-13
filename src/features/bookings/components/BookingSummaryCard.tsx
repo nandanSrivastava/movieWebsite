@@ -51,7 +51,7 @@ export default function BookingSummaryCard({ show, selectedSeatLabels, seatCount
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span style={{ color: '#9CA3AF' }}>🏛️ Screen:</span>
-          <strong style={{ color: 'var(--highlight-gold)' }}>{show.screen?.name}</strong>
+          <strong style={{ color: 'var(--highlight-gold)' }}>Dhrub Talkies</strong>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
           <span style={{ color: '#9CA3AF' }}>📅 Date:</span>

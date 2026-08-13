@@ -143,12 +143,10 @@ export class MockDatabase implements DatabaseClient {
       created_at: new Date().toISOString()
     });
 
-    // 3. Seed Screens & Layouts
+    // 3. Seed Screens & Layouts (Single Screen Theater)
     const s1 = 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c';
-    const s2 = 'bb28876c-3e6f-4db4-bb14-5d5b12165977';
 
-    this.screens.set(s1, { id: s1, name: 'Screen 1 — Dhrub Talkies', total_rows: 9, seats_per_row: 18 });
-    this.screens.set(s2, { id: s2, name: 'Screen 2 — Dhrub Talkies', total_rows: 9, seats_per_row: 18 });
+    this.screens.set(s1, { id: s1, name: 'Dhrub Talkies', total_rows: 9, seats_per_row: 18 });
 
     // ─────────────────────────────────────────────────────────────
     // Dhrub Talkies actual hall layout (from sketch, front → back):
@@ -179,22 +177,18 @@ export class MockDatabase implements DatabaseClient {
     };
 
     const screen1Layouts = generateHallLayouts(s1);
-    const screen2Layouts = generateHallLayouts(s2);
     this.seatLayouts.set(s1, screen1Layouts);
-    this.seatLayouts.set(s2, screen2Layouts);
 
-    // 4. Seed Shows
+    // 4. Seed Shows (Single Screen Sequential Schedule)
     const today = new Date().toISOString().split('T')[0];
     const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
     const dayAfter = new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0];
 
-    const showTimes1 = ['10:00:00', '13:30:00', '17:00:00', '20:30:00'];
-    const showTimes2 = ['11:15:00', '14:45:00', '18:15:00', '21:45:00'];
+    const showTimes = ['10:00:00', '13:30:00', '17:00:00', '20:30:00'];
 
-    [today, tomorrow, dayAfter].forEach((date, dateIndex) => {
-      // Screen 1 Mix
-      showTimes1.forEach((time, index) => {
-        let movieId = m1; // Default
+    [today, tomorrow, dayAfter].forEach((date) => {
+      showTimes.forEach((time, index) => {
+        let movieId = m1;
         if (index === 0) movieId = m1;
         else if (index === 1) movieId = m2;
         else if (index === 2) movieId = m3;
@@ -214,42 +208,6 @@ export class MockDatabase implements DatabaseClient {
         
         // Initialize seat statuses as available
         const layouts = this.seatLayouts.get(s1) || [];
-        layouts.forEach((layout) => {
-          this.seatStatuses.set(`${id}:${layout.id}`, {
-            id: `status-${id}-${layout.id}`,
-            show_id: id,
-            seat_layout_id: layout.id,
-            status: 'available',
-            locked_by: null,
-            locked_at: null,
-            lock_expires_at: null,
-            booking_id: null
-          });
-        });
-      });
-
-      // Screen 2 Mix
-      showTimes2.forEach((time, index) => {
-        let movieId = m2; // Default
-        if (index === 0) movieId = m4;
-        else if (index === 1) movieId = m3;
-        else if (index === 2) movieId = m2;
-        else if (index === 3) movieId = m1;
-
-        const id = `show-s2-${date}-${time.replace(/:/g, '-')}`;
-        this.shows.set(id, {
-          id,
-          movie_id: movieId,
-          screen_id: s2,
-          show_date: date,
-          show_time: time,
-          price_classic: 150,
-          price_premium: 200,
-          created_at: new Date().toISOString()
-        });
-
-        // Initialize seats
-        const layouts = this.seatLayouts.get(s2) || [];
         layouts.forEach((layout) => {
           this.seatStatuses.set(`${id}:${layout.id}`, {
             id: `status-${id}-${layout.id}`,

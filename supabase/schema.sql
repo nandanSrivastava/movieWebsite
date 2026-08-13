@@ -538,10 +538,9 @@ INSERT INTO public.movies (id, title, synopsis, genre, language, duration_minute
   ('c3d4e5f6-a7b8-9012-3456-789abcdef012', 'PK', 'An alien on Earth loses the only device he can use to communicate with his spaceship. His innocent nature and child-like questions force the country to evaluate the impact of religion on its people.', 'Comedy, Drama', 'Hindi', 153, 'UA', 'https://upload.wikimedia.org/wikipedia/en/c/c3/PK_poster.jpg', 'https://www.youtube.com/embed/82ZEDGPCkT8', FALSE, TRUE)
 ON CONFLICT (id) DO NOTHING;
 
--- Screens
+-- Screens (Single Screen Cinema)
 INSERT INTO public.screens (id, name, total_rows, seats_per_row) VALUES
-  ('a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'Screen 1 (IMAX)', 8, 10),
-  ('bb28876c-3e6f-4db4-bb14-5d5b12165977', 'Screen 2 (Gold)', 6, 8)
+  ('a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'Dhrub Talkies', 9, 18)
 ON CONFLICT (id) DO NOTHING;
 
 -- Seat layouts — Dhrub Talkies actual hall (matches sketch, front → back)
@@ -574,28 +573,5 @@ FROM unnest(ARRAY[1,2,3,4,5,14,15,16,17,18]) AS n(num)
 UNION ALL
 -- Row P (Gold/Premium)
 SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'P', n.num, 'premium'
-FROM unnest(ARRAY[1,2,3,4,5,6,7,8,9,10,11]) AS n(num)
-ON CONFLICT (screen_id, row_label, seat_number) DO NOTHING;
-
--- Screen 2: same layout
-INSERT INTO public.seat_layout (screen_id, row_label, seat_number, category)
-SELECT s.screen_id, r.row_label, n.num,
-  CASE WHEN n.num BETWEEN 6 AND 13 THEN 'premium' ELSE 'economy' END
-FROM
-  (VALUES ('bb28876c-3e6f-4db4-bb14-5d5b12165977'::uuid)) AS s(screen_id),
-  (VALUES ('G'),('F'),('E'),('D'),('C')) AS r(row_label),
-  generate_series(1,18) AS n(num)
-UNION ALL
-SELECT 'bb28876c-3e6f-4db4-bb14-5d5b12165977', 'A', n.num,
-  CASE WHEN n.num <= 13 THEN 'premium' ELSE 'economy' END
-FROM generate_series(6,18) AS n(num)
-UNION ALL
-SELECT 'bb28876c-3e6f-4db4-bb14-5d5b12165977', 'B', n.num, 'economy'
-FROM unnest(ARRAY[1,2,3,4,5,14,15,16,17,18]) AS n(num)
-UNION ALL
-SELECT 'bb28876c-3e6f-4db4-bb14-5d5b12165977', 'S', n.num, 'economy'
-FROM unnest(ARRAY[1,2,3,4,5,14,15,16,17,18]) AS n(num)
-UNION ALL
-SELECT 'bb28876c-3e6f-4db4-bb14-5d5b12165977', 'P', n.num, 'premium'
 FROM unnest(ARRAY[1,2,3,4,5,6,7,8,9,10,11]) AS n(num)
 ON CONFLICT (screen_id, row_label, seat_number) DO NOTHING;

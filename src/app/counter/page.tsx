@@ -107,12 +107,15 @@ export default function CounterPOSPage() {
 
   const isShowInPast = (showDate: string, showTime: string) => {
     try {
-      const showDateTime = new Date(`${showDate}T${showTime}+05:30`);
+      const formattedTime = showTime.length === 5 ? `${showTime}:00` : showTime;
+      const showDateTime = new Date(`${showDate}T${formattedTime}+05:30`);
       return showDateTime.getTime() < Date.now();
     } catch {
       return false;
     }
   };
+
+  const upcomingShows = shows.filter((show: any) => !isShowInPast(show.show_date, show.show_time));
 
   if (authLoading || !user || !['admin', 'member'].includes(user.role)) {
     return (
@@ -245,56 +248,41 @@ export default function CounterPOSPage() {
 
               {loadingShows ? (
                 <p style={{ color: 'var(--text-muted)' }}>Loading active showtimes...</p>
-              ) : shows.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)' }}>No showtimes currently scheduled.</p>
+              ) : upcomingShows.length === 0 ? (
+                <p style={{ color: 'var(--text-muted)' }}>No upcoming showtimes currently scheduled.</p>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  {shows.map((show: any) => {
-                    const past = isShowInPast(show.show_date, show.show_time);
-                    return (
-                      <div 
-                        key={show.id}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '16px',
-                          backgroundColor: 'var(--bg-secondary)',
-                          border: '1px solid var(--border-subtle)',
-                          borderRadius: '8px',
-                          opacity: past ? 0.5 : 1
-                        }}
-                      >
-                        <div>
-                          <strong style={{ fontSize: '0.95rem', color: past ? 'var(--text-muted)' : '#FFFFFF', display: 'block', textDecoration: past ? 'line-through' : 'none' }}>
-                            {show.movie?.title}
-                          </strong>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                            {show.screen?.name} • {formatDateLabel(show.show_date)} at {formatTimeLabel(show.show_time)}
-                            {past && <span style={{ color: 'var(--accent-crimson)', marginLeft: '8px', fontWeight: 'bold' }}>(PASSED)</span>}
-                          </span>
-                        </div>
-
-                        {past ? (
-                          <button
-                            disabled
-                            className="btn btn-secondary"
-                            style={{ padding: '8px 16px', fontSize: '0.8rem', cursor: 'not-allowed', opacity: 0.6 }}
-                          >
-                            Passed
-                          </button>
-                        ) : (
-                          <Link 
-                            href={`/booking/${show.id}`}
-                            className="btn btn-primary"
-                            style={{ padding: '8px 16px', fontSize: '0.8rem' }}
-                          >
-                            Book
-                          </Link>
-                        )}
+                  {upcomingShows.map((show: any) => (
+                    <div 
+                      key={show.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '16px',
+                        backgroundColor: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px'
+                      }}
+                    >
+                      <div>
+                        <strong style={{ fontSize: '0.95rem', color: '#FFFFFF', display: 'block' }}>
+                          {show.movie?.title}
+                        </strong>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                          Dhrub Talkies • {formatDateLabel(show.show_date)} at {formatTimeLabel(show.show_time)}
+                        </span>
                       </div>
-                    );
-                  })}
+
+                      <Link 
+                        href={`/booking/${show.id}`}
+                        className="btn btn-primary"
+                        style={{ padding: '8px 16px', fontSize: '0.8rem' }}
+                      >
+                        Book
+                      </Link>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

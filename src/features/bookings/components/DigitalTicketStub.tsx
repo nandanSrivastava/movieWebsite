@@ -79,7 +79,7 @@ export default function DigitalTicketStub({
           <div>
             <span style={{ fontSize: '0.75rem', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Screen</span>
             <p style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: '2px', color: '#FFFFFF' }}>
-              {booking?.show?.screen?.name}
+              Dhrub Talkies
             </p>
           </div>
           <div style={{ textAlign: 'right' }}>
