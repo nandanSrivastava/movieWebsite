@@ -42,19 +42,19 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://dhrubcineplex.com"),
+  metadataBase: new URL("https://dhrubcineplex.in"),
   title: {
     default: "Dhrub Cineplex | Premium Movie Experience in Bagaha",
     template: "%s | Dhrub Cineplex",
   },
-  description: "Experience the magic of cinema at Dhrub Cineplex, Bagaha's premier luxury theater. Book tickets online for the latest blockbusters with premium recliners and Dolby Atmos sound.",
-  keywords: ["movie tickets", "Bagaha cinema", "Dhrub Talkies", "Dhrub Cineplex", "book movies", "luxury cinema"],
+  description: "Experience the magic of cinema at Dhrub Cineplex (Dhruv Cineplex), Bagaha's premier luxury theater. Book tickets online for the latest blockbusters with premium recliners and Dolby Atmos sound.",
+  keywords: ["movie tickets", "Bagaha cinema", "Dhrub Talkies", "Dhrub Cineplex", "Dhruv Cineplex", "Dhruv Talkies", "book movies", "luxury cinema"],
   authors: [{ name: "Dhrub Cineplex" }],
   creator: "Dhrub Cineplex",
   openGraph: {
     type: "website",
     locale: "en_IN",
-    url: "https://dhrubcineplex.com",
+    url: "https://dhrubcineplex.in",
     title: "Dhrub Cineplex | Premium Movie Experience",
     description: "Book tickets online for the latest blockbusters with premium recliners and Dolby Atmos sound.",
     siteName: "Dhrub Cineplex",
