@@ -94,6 +94,25 @@ export default function RootLayout({
   return (
     <html lang="en" className="scroll-smooth" suppressHydrationWarning>
       <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify({
+              "@context": "https://schema.org",
+              "@type": "MovieTheater",
+              "name": "Dhrub Cineplex",
+              "alternateName": "Dhruv Cineplex",
+              "url": "https://dhrubcineplex.in",
+              "logo": "https://dhrubcineplex.in/logo.jpeg",
+              "address": {
+                "@type": "PostalAddress",
+                "addressLocality": "Bagaha",
+                "addressRegion": "Bihar",
+                "addressCountry": "IN"
+              }
+            })
+          }}
+        />
       </head>
       <body className={`antialiased min-h-screen bg-void text-primary selection:bg-gold-500/30 selection:text-gold-200 ${cinzel.variable} ${inter.variable} ${outfit.variable} ${playfair.variable}`}>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
