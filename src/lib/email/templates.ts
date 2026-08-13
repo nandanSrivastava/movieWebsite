@@ -78,47 +78,167 @@ export function ticketConfirmationEmail(data: TicketEmailData): string {
   } = data;
 
   const qrHtml = qrCodeDataUrl
-    ? `<img src="${qrCodeDataUrl}" alt="Ticket QR code" width="180" height="180" style="display:block;margin:0 auto;border-radius:8px;background:#ffffff;padding:8px;" />`
+    ? `<img src="${qrCodeDataUrl}" alt="Ticket QR code" width="140" height="140" style="display:block; margin: 0 auto; border-radius:8px;" />`
     : qrToken
-      ? `<div style="font-family:monospace;font-size:12px;color:#9ca3af;word-break:break-all;text-align:center;">${escapeHtml(qrToken)}</div>`
-      : '';
+      ? `<div style="width:140px;height:140px;color:#000;text-align:center;font-size:11px;word-break:break-all;margin: 0 auto;display:table-cell;vertical-align:middle;">${escapeHtml(qrToken)}</div>`
+      : `<div style="width:140px;height:140px;background:#eee;margin:0 auto;border-radius:8px;"></div>`;
 
-  const body = `
-    <div style="text-align:center;margin-bottom:20px;">
-      <div style="font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#10b981;font-weight:bold;">
-        ${paymentMode === 'cash' ? 'Cash Sale Confirmed' : 'Payment Successful'}
-      </div>
-      <h2 style="margin:10px 0 4px;font-size:24px;line-height:1.2;">Ticket Confirmed!</h2>
-      <p style="margin:0;color:#9ca3af;font-size:14px;">Hi ${escapeHtml(customerName || 'Movie Buff')}, your seats are locked in.</p>
-    </div>
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(THEATER_NAME)} Ticket</title>
+  <style>
+    @media only screen and (max-width: 700px) {
+      .ticket-row { display: block !important; width: 100% !important; }
+      .ticket-main { display: block !important; width: 100% !important; border-right: none !important; padding: 20px 10px !important; }
+      .ticket-stub { display: block !important; width: 100% !important; border-top: 2px dashed #d4af37 !important; padding: 20px 10px !important; }
+      .stack-mobile { display: block !important; width: 100% !important; margin-bottom: 15px !important; }
+      .hide-mobile { display: none !important; }
+      .main-title { font-size: 32px !important; }
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;background-color:#020617;font-family:Arial,Helvetica,sans-serif;color:#ffffff;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#020617;padding:30px 15px;">
+    <tr>
+      <td align="center">
+        <!-- Ticket Wrapper -->
+        <table role="presentation" width="100%" style="max-width:850px;background-color:#0f172a;border-radius:16px;border:2px solid #d4af37;overflow:hidden;" cellpadding="0" cellspacing="0">
+          <tr class="ticket-row">
+            <!-- Main Ticket -->
+            <td class="ticket-main" width="72%" style="padding: 40px; border-right: 2px dashed #d4af37; vertical-align: top;">
+                
+               <!-- Top Section -->
+               <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                 <tr>
+                   <td align="center">
+                     <h1 class="main-title" style="color:#d4af37; font-size: 46px; margin:0; letter-spacing: 4px; text-transform: uppercase;">DHRUB CINEPLEX</h1>
+                     <p style="color:#d4af37; font-size: 15px; margin: 8px 0 20px 0; letter-spacing: 5px; text-transform: uppercase;">Experience the epic tale</p>
+                     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin: 20px 0;">
+                       <tr>
+                         <td width="45%" style="border-bottom: 1px solid #d4af37;"></td>
+                         <td width="10%" align="center" style="color: #d4af37; font-size: 16px;">★</td>
+                         <td width="45%" style="border-bottom: 1px solid #d4af37;"></td>
+                       </tr>
+                     </table>
+                   </td>
+                 </tr>
+               </table>
 
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0d1529;border-radius:12px;border:1px solid rgba(255,255,255,0.08);margin-bottom:20px;">
-      <tr>
-        <td style="padding:18px 20px;">
-          <div style="font-size:18px;font-weight:bold;margin-bottom:12px;">${escapeHtml(movieTitle)}</div>
-          <div style="font-size:13px;color:#cbd5e1;line-height:1.9;">
-            🏛️ <strong>Screen:</strong> ${escapeHtml(screenName)}<br/>
-            📅 <strong>Date:</strong> ${escapeHtml(showDate)}<br/>
-            🕒 <strong>Showtime:</strong> ${escapeHtml(showTime)}<br/>
-            🎟️ <strong>Seats:</strong> <span style="color:#f59e0b;font-weight:bold;">${escapeHtml(seats)}</span><br/>
-            💳 <strong>Mode:</strong> ${paymentMode === 'cash' ? 'Counter Cash' : 'Online (Razorpay)'}<br/>
-            💰 <strong>Amount Paid:</strong> ₹${escapeHtml(totalAmount)}
-          </div>
-        </td>
-      </tr>
-    </table>
+               <!-- Info Section -->
+               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top: 25px;">
+                 <tr>
+                   <td class="stack-mobile" width="33%" align="center" style="vertical-align: top; padding: 10px;">
+                     <div style="color:#d4af37; font-size: 15px; font-weight: bold; letter-spacing: 1px; margin-bottom: 10px;">🎬 MOVIE</div>
+                     <div style="color:#ffffff; font-size: 20px; font-weight: bold; text-transform: uppercase; line-height: 1.3;">${escapeHtml(movieTitle)}</div>
+                   </td>
+                   <td class="stack-mobile" width="33%" align="center" style="vertical-align: top; padding: 10px;">
+                     <div style="color:#d4af37; font-size: 15px; font-weight: bold; letter-spacing: 1px; margin-bottom: 10px;">📅 DATE</div>
+                     <div style="background-color:#d4af37; color:#0f172a; padding: 10px 20px; border-radius: 8px; font-weight: bold; font-size: 18px; display: inline-block;">${escapeHtml(showDate)}</div>
+                   </td>
+                   <td class="stack-mobile" width="33%" align="center" style="vertical-align: top; padding: 10px;">
+                     <div style="color:#d4af37; font-size: 15px; font-weight: bold; letter-spacing: 1px; margin-bottom: 10px;">🕒 TIME</div>
+                     <div style="color:#ffffff; font-size: 20px; font-weight: bold;">${escapeHtml(showTime)}</div>
+                   </td>
+                 </tr>
+               </table>
 
-    <div style="text-align:center;margin-bottom:16px;">
-      <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#9ca3af;margin-bottom:8px;">Show this at the entrance</div>
-      ${qrHtml}
-    </div>
+               <!-- Seat Section -->
+               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top: 35px;">
+                 <tr>
+                   <td align="center">
+                     <table role="presentation" cellpadding="0" cellspacing="0" style="border: 2px solid #d4af37; border-radius: 12px; display: inline-block; margin: 0 auto;">
+                       <tr>
+                         <td style="padding: 15px 15px 15px 25px;">
+                           <span style="color:#d4af37; font-size: 20px; font-weight: bold;">SEAT NO.</span>
+                         </td>
+                         <td style="padding: 15px 15px 15px 5px;">
+                           <div style="background-color:#d4af37; color:#0f172a; padding: 8px 18px; border-radius: 6px; font-weight: bold; font-size: 20px;">${escapeHtml(seats)}</div>
+                         </td>
+                         <td style="padding: 15px;">
+                           <div style="border-left: 1px solid #d4af37; height: 35px;"></div>
+                         </td>
+                         <td style="padding: 15px 15px 15px 5px;">
+                           <span style="color:#d4af37; font-size: 22px; font-weight: bold; text-transform: uppercase;">${escapeHtml(screenName)}</span>
+                         </td>
+                         <td style="padding: 15px 25px 15px 15px;">
+                           <span style="color:#d4af37; font-size: 20px; font-weight: bold;">Rs ${escapeHtml(totalAmount)}/-</span>
+                         </td>
+                       </tr>
+                     </table>
+                   </td>
+                 </tr>
+               </table>
 
-    <p style="font-size:12px;color:#9ca3af;text-align:center;margin:8px 0 0;">
-      Booking ID: <span style="font-family:monospace;color:#cbd5e1;">${escapeHtml(bookingId)}</span>
-    </p>
-  `;
+               <!-- Bottom Footer -->
+               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top: 35px;">
+                 <tr>
+                   <td align="center">
+                     <div style="color:#d4af37; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 20px;">★ THANKYOU FOR CHOOSING DHRUB CINEPLEX BAGAHA ★</div>
+                     <table role="presentation" cellpadding="0" cellspacing="0" style="border: 1px solid #d4af37; border-radius: 20px; display: inline-block; margin: 0 auto;">
+                        <tr>
+                          <td style="padding: 12px 25px;">
+                            <span style="color:#ffffff; font-size: 15px;">📸 @dhrubcineplex <span style="color:#d4af37; margin: 0 10px;">|</span> Follow us on Instagram for more details</span>
+                          </td>
+                        </tr>
+                     </table>
+                   </td>
+                 </tr>
+               </table>
 
-  return baseLayout(body);
+            </td>
+
+            <!-- Stub Ticket -->
+            <td class="ticket-stub" width="28%" style="padding: 40px 20px; vertical-align: top; text-align: center; background-color: #0f172a;">
+               <h2 style="color:#d4af37; font-size: 28px; margin:0; letter-spacing: 2px; text-transform: uppercase; line-height: 1.2;">DHRUB<br/>CINEPLEX</h2>
+               
+               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin: 25px 0;">
+                 <tr>
+                   <td width="35%" style="border-bottom: 1px solid #d4af37;"></td>
+                   <td width="30%" align="center" style="color: #d4af37; font-size: 16px;">★</td>
+                   <td width="35%" style="border-bottom: 1px solid #d4af37;"></td>
+                 </tr>
+               </table>
+
+               <p style="color:#d4af37; font-size: 16px; margin: 20px 0; letter-spacing: 2px;">★ SCAN QR ★</p>
+               
+               <!-- QR Code -->
+               <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                 <tr>
+                   <td align="center">
+                     <div style="background-color:#ffffff; padding: 12px; border-radius: 12px; display: inline-block; margin-bottom: 15px;">
+                       ${qrHtml}
+                     </div>
+                   </td>
+                 </tr>
+               </table>
+
+               <p style="color:#ec4899; font-size: 16px; font-weight: bold; margin: 10px 0; letter-spacing: 1px;">@DHRUBCINEPLEX</p>
+               <p style="color:#d4af37; font-size: 11px; letter-spacing: 2px; text-transform: uppercase; margin-top: 25px; margin-bottom: 10px;">EXPERIENCE THE EPIC TALE</p>
+               <div style="color:#d4af37; font-size: 16px;">★</div>
+               
+               <div style="margin-top:20px; font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:1px;">Booking ID</div>
+               <div style="font-family:monospace; color:#94a3b8; font-size:13px; margin-top:4px;">${escapeHtml(bookingId)}</div>
+            </td>
+          </tr>
+        </table>
+        
+        <!-- Email Footer -->
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:850px; margin-top: 20px;">
+          <tr>
+            <td align="center" style="padding:16px 24px 24px;font-size:12px;color:#475569;border-top:1px solid rgba(255,255,255,0.06);">
+              This is an automated message from ${escapeHtml(THEATER_NAME)}. Please do not reply to this email.<br/>
+              © ${new Date().getFullYear()} ${escapeHtml(THEATER_NAME)}. All rights reserved.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
 }
 
 /** Welcome / onboarding email — fire after successful signup. */

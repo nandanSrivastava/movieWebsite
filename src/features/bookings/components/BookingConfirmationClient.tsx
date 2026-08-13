@@ -19,6 +19,7 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
   
   const [pollingAttempts, setPollingAttempts] = useState(0);
   const [hasNotified, setHasNotified] = useState(false);
+  const [verificationFailed, setVerificationFailed] = useState(false);
 
   // ── 1. WEBHOOK COMPLETION POLLING WITH REACT QUERY ───────────
   const { data: booking, refetch } = useQuery({
@@ -31,8 +32,10 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
     },
     refetchInterval: (query) => {
       // In React Query v5, query is passed to refetchInterval.
-      // query.state.data is the current data.
-      if (query.state?.data?.payment_status !== 'pending' || pollingAttempts >= 20) return false;
+      const paymentId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('paymentId') : null;
+      const maxAttempts = paymentId ? 3 : 20;
+      
+      if (query.state?.data?.payment_status !== 'pending' || pollingAttempts >= maxAttempts) return false;
       return 1500;
     },
     initialData: initialBooking,
@@ -50,11 +53,13 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
       }
     }
     
-    if (pollingAttempts >= 20 && status === 'pending' && !hasNotified) {
+    const paymentId = searchParams.get('paymentId');
+    const maxAttempts = paymentId ? 3 : 20;
+
+    if (pollingAttempts >= maxAttempts && status === 'pending' && !hasNotified) {
       setHasNotified(true);
-      const paymentId = searchParams.get('paymentId');
       if (paymentId) {
-        showToast('Webhook delayed. Verifying payment fallback...', 'info');
+        showToast('Verifying payment with the bank...', 'info');
         fetch('/api/bookings/verify-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -63,16 +68,19 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
           if (data.status === 'confirmed' || data.status === 'refunded') {
              refetch();
           } else {
-             showToast('Payment verification timed out. Please contact support.', 'error');
+             showToast('Payment verification failed. Please contact support.', 'error');
+             setVerificationFailed(true);
           }
         }).catch(() => {
           showToast('Payment verification failed. Please contact support.', 'error');
+          setVerificationFailed(true);
         });
       } else {
         showToast('Payment confirmation is taking longer than expected. Please check your email or refresh.', 'info');
+        setVerificationFailed(true);
       }
     }
-  }, [status, pollingAttempts, hasNotified, showToast, searchParams, initialBooking.id]);
+  }, [status, pollingAttempts, hasNotified, showToast, searchParams, initialBooking.id, refetch]);
 
   // ── 2. QR CODE GENERATOR WITH REACT QUERY ────────────────────
   const { data: qrCodeData } = useQuery({
@@ -116,6 +124,25 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
 
   // State: Pending Validation
   if (status === 'pending') {
+    if (verificationFailed) {
+      return (
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', color: '#FFFFFF', textAlign: 'center', padding: '24px'
+        }}>
+          <div style={{ width: '60px', height: '60px', borderRadius: '50%', backgroundColor: 'rgba(229, 9, 20, 0.1)', color: '#E50914', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px', fontWeight: 'bold', marginBottom: '24px' }}>
+            !
+          </div>
+          <h3 style={{ fontSize: '1.6rem', fontWeight: 800, fontFamily: 'var(--font-family-heading)' }}>Verification Failed</h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', maxWidth: '480px', lineHeight: 1.6, marginTop: '8px', marginBottom: '32px' }}>
+            We could not automatically verify your transaction status with the bank. If money was deducted, it will be refunded or the ticket will be issued manually. Please contact support.
+          </p>
+          <button onClick={() => window.location.reload()} className="btn btn-primary" style={{ padding: '12px 28px' }}>
+            Try Again
+          </button>
+        </div>
+      );
+    }
+
     return (
       <div style={{
         display: 'flex',

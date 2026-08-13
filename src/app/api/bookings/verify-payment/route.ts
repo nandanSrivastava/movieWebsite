@@ -44,7 +44,18 @@ export async function POST(req: NextRequest) {
 
     const payment = await razorpay.payments.fetch(paymentId);
 
-    if (payment.status === 'captured' && payment.order_id === booking.razorpay_order_id) {
+    if ((payment.status === 'captured' || payment.status === 'authorized') && payment.order_id === booking.razorpay_order_id) {
+      // If the payment is authorized but not captured (e.g. auto-capture is off), capture it here
+      if (payment.status === 'authorized') {
+        try {
+          await razorpay.payments.capture(paymentId, payment.amount, payment.currency);
+        } catch (captureErr) {
+          console.error('Failed to capture authorized payment during fallback:', captureErr);
+          // If capture fails, we probably shouldn't finalize the booking, but we can return pending
+          return NextResponse.json({ status: 'pending', error: 'Failed to capture payment' });
+        }
+      }
+
       const seatLayoutIds = booking.booking_seats?.map(bs => bs.seat_layout_id) || [];
       const success = await db.confirmBooking(booking.id, booking.show_id, seatLayoutIds, booking.booked_by);
 
@@ -70,7 +81,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ status: 'refunded', error: 'Seat hold expired' });
       }
     } else {
-      return NextResponse.json({ status: 'pending', error: 'Payment not captured' });
+      return NextResponse.json({ status: 'pending', error: 'Payment not captured or authorized' });
     }
 
   } catch (err: any) {
