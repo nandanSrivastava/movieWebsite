@@ -9,6 +9,7 @@ import CheckoutForm from '@/features/bookings/components/CheckoutForm';
 import MockGatewayModal from '@/features/bookings/components/MockGatewayModal';
 import { isMockMode } from '@/lib/config';
 import { supabase as supabaseClient } from '@/lib/supabaseClient';
+import { getAnonSessionId } from '@/features/bookings/hooks/useAnonSession';
 
 function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -194,12 +195,14 @@ export default function CheckoutClient({
     showToast('Payment simulated as FAILED. Hold released.', 'error');
     
     try {
+      const anonSessionId = !user ? getAnonSessionId() : undefined;
       await fetch('/api/seats/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           showId,
-          seatLayoutIds
+          seatLayoutIds,
+          ...(anonSessionId ? { anonSessionId } : {})
         })
       });
     } catch {}

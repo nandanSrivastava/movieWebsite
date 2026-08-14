@@ -8,6 +8,7 @@ import { ShowType, SeatStatusType } from '@/lib/db';
 import { isMockMode } from '@/lib/config';
 import { supabase as supabaseClient } from '@/lib/supabaseClient';
 import { createClient } from '@supabase/supabase-js';
+import { getAnonSessionId } from '@/features/bookings/hooks/useAnonSession';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import CinemaScreen from '@/features/bookings/components/CinemaScreen';
 import SeatingGrid from '@/features/bookings/components/SeatingGrid';
@@ -48,10 +49,13 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
 
   // ── 0. RESTORE PREVIOUSLY LOCKED SEATS ──────────────
   useEffect(() => {
-    if (!hasInitialized && user && seats.length > 0) {
+    if (!hasInitialized && seats.length > 0) {
+      const lockIdentity = user?.id || getAnonSessionId();
+      if (!lockIdentity) { setHasInitialized(true); return; }
+
       const myLockedSeats = seats.filter(
         seat => seat.status === 'locked' && 
-                seat.locked_by === user.id && 
+                seat.locked_by === lockIdentity && 
                 seat.lock_expires_at && 
                 new Date(seat.lock_expires_at).getTime() > Date.now()
       );
@@ -107,12 +111,14 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
     
     // Unlock held seats in DB
     try {
+      const anonSessionId = !user ? getAnonSessionId() : undefined;
       await fetch('/api/seats/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           showId: show.id,
-          seatLayoutIds: Array.from(selectedSeats)
+          seatLayoutIds: Array.from(selectedSeats),
+          ...(anonSessionId ? { anonSessionId } : {})
         })
       });
       showToast('Your seat hold has expired. Please select seats and check out again.', 'error');
@@ -151,10 +157,11 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
     if (isLocked) return; // Cannot modify selection after hold locking
     if (seat.status === 'booked') return;
     
-    // If locked by another user
+    // If locked by another user (check both authenticated and anon identity)
+    const currentIdentity = user?.id || getAnonSessionId();
     const isLockedByOther = 
       seat.status === 'locked' && 
-      seat.locked_by !== user?.id && 
+      seat.locked_by !== currentIdentity && 
       seat.lock_expires_at && 
       new Date(seat.lock_expires_at).getTime() > Date.now();
       
@@ -181,12 +188,6 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
 
   // ── 4. ACQUIRE LOCKS AND CHECKOUT ───────────────────────────
   const handleProceedToPayment = async () => {
-    if (!user) {
-      showToast('Please sign in to book tickets.', 'info');
-      router.push(`/login?redirect=/booking/${show.id}`);
-      return;
-    }
-
     if (selectedSeats.size === 0) {
       showToast('Please select at least one seat.', 'info');
       return;
@@ -194,12 +195,20 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
 
     setSubmitting(true);
     try {
-      // Get Supabase token if in live mode
+      // Get Supabase token if logged in and in live mode
       let token = '';
-      if (!isMockMode) {
+      if (!isMockMode && user) {
         const { data } = await supabaseClient.auth.getSession();
         token = data.session?.access_token || '';
       }
+
+      // Build lock request body — include anonymous session ID for guest users
+      const anonSessionId = !user ? getAnonSessionId() : undefined;
+      const lockBody: any = {
+        showId: show.id,
+        seatLayoutIds: Array.from(selectedSeats),
+      };
+      if (anonSessionId) lockBody.anonSessionId = anonSessionId;
 
       // 1. Lock seats via API
       const lockRes = await fetch('/api/seats/lock', {
@@ -208,10 +217,7 @@ export default function SeatingMapClient({ show, initialSeats }: SeatingMapClien
           'Content-Type': 'application/json',
           ...(token ? { 'Authorization': `Bearer ${token}` } : {})
         },
-        body: JSON.stringify({
-          showId: show.id,
-          seatLayoutIds: Array.from(selectedSeats)
-        })
+        body: JSON.stringify(lockBody)
       });
 
       if (!lockRes.ok) {

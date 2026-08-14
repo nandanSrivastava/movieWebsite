@@ -6,6 +6,7 @@ import { createClient } from '@supabase/supabase-js';
 const unlockRequestSchema = z.object({
   showId: z.string().min(1),
   seatLayoutIds: z.array(z.string().min(1)).min(1),
+  anonSessionId: z.string().uuid().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -16,9 +17,9 @@ export async function POST(req: NextRequest) {
     if (!result.success) {
       return NextResponse.json({ error: 'Invalid inputs', details: result.error.format() }, { status: 400 });
     }
-    const { showId, seatLayoutIds } = result.data;
+    const { showId, seatLayoutIds, anonSessionId } = result.data;
 
-    // 2. Identify Authenticated User Session
+    // 2. Identify User Session (authenticated or anonymous)
     let userId: string | null = null;
     const isSupabaseConfigured = 
       !!process.env.NEXT_PUBLIC_SUPABASE_URL && 
@@ -54,8 +55,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Fall back to anonymous session ID if no authenticated user
+    if (!userId && anonSessionId) {
+      userId = anonSessionId;
+    }
+
     if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized session' }, { status: 401 });
+      return NextResponse.json({ error: 'No session to unlock seats.' }, { status: 401 });
     }
 
     // 3. Unlock Seats
@@ -63,7 +69,8 @@ export async function POST(req: NextRequest) {
 
     // 4. Log Audit Event
     const ip = req.headers.get('x-forwarded-for') || 'unknown';
-    await db.logAudit(userId, 'SEAT_UNLOCK', { showId, seatLayoutIds }, ip);
+    const isAnon = !!anonSessionId && userId === anonSessionId;
+    await db.logAudit(isAnon ? null : userId, 'SEAT_UNLOCK', { showId, seatLayoutIds, anonymous: isAnon }, ip);
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
@@ -71,3 +78,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
   }
 }
+

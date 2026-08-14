@@ -112,7 +112,7 @@ export default function CheckoutForm({
 
         <div className="form-group">
           <label className="form-label" style={{ fontWeight: 600 }}>
-            Email (for your digital ticket)
+            Email <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.85rem' }}>(Optional)</span>
           </label>
           <input
             type="email"
@@ -133,6 +133,9 @@ export default function CheckoutForm({
               boxSizing: 'border-box'
             }}
           />
+          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '6px', display: 'block' }}>
+            Your ticket will be emailed automatically if provided. You can also retrieve it later on our <a href="/booking/lookup" style={{ color: 'var(--highlight-gold)', textDecoration: 'underline' }}>Ticket Lookup</a> page using your phone number.
+          </span>
         </div>
 
         {/* Total amount bar */}

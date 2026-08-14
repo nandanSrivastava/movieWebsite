@@ -7,6 +7,7 @@ import { rateLimiter } from '@/lib/rateLimit';
 const lockRequestSchema = z.object({
   showId: z.string().min(1),
   seatLayoutIds: z.array(z.string().min(1)).min(1),
+  anonSessionId: z.string().uuid().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -22,9 +23,9 @@ export async function POST(req: NextRequest) {
     if (!result.success) {
       return NextResponse.json({ error: 'Invalid inputs', details: result.error.format() }, { status: 400 });
     }
-    const { showId, seatLayoutIds } = result.data;
+    const { showId, seatLayoutIds, anonSessionId } = result.data;
 
-    // 2. Identify Authenticated User Session
+    // 2. Identify User Session (authenticated or anonymous)
     let userId: string | null = null;
     const isSupabaseConfigured =
       !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
@@ -33,14 +34,11 @@ export async function POST(req: NextRequest) {
     if (!isSupabaseConfigured) {
       // Mock mode auth resolution
       const mockSession = req.cookies.get('cinebook_mock_session');
-      if (!mockSession) {
-        return NextResponse.json({ error: 'Unauthorized session' }, { status: 401 });
-      }
-      try {
-        const sessionObj = JSON.parse(mockSession.value);
-        userId = sessionObj.id;
-      } catch {
-        return NextResponse.json({ error: 'Malformed mock session' }, { status: 401 });
+      if (mockSession) {
+        try {
+          const sessionObj = JSON.parse(mockSession.value);
+          userId = sessionObj.id;
+        } catch {}
       }
     } else {
       // Live mode auth resolution
@@ -60,14 +58,18 @@ export async function POST(req: NextRequest) {
         userRes = await supabase.auth.getUser();
       }
 
-      if (userRes.error || !userRes.data.user) {
-        return NextResponse.json({ error: 'Unauthorized session' }, { status: 401 });
+      if (userRes.data.user) {
+        userId = userRes.data.user.id;
       }
-      userId = userRes.data.user.id;
+    }
+
+    // Fall back to anonymous session ID if no authenticated user
+    if (!userId && anonSessionId) {
+      userId = anonSessionId;
     }
 
     if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized session' }, { status: 401 });
+      return NextResponse.json({ error: 'Please sign in or allow anonymous session to continue.' }, { status: 401 });
     }
 
     // 2.5. Verify Show is not in the past.
@@ -98,7 +100,8 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Log Audit Event
-    await db.logAudit(userId, 'SEAT_LOCK', { showId, seatLayoutIds, holdSeconds: 360 }, ip);
+    const isAnon = !!anonSessionId && userId === anonSessionId;
+    await db.logAudit(isAnon ? null : userId, 'SEAT_LOCK', { showId, seatLayoutIds, holdSeconds: 360, anonymous: isAnon }, ip);
 
     return NextResponse.json({ success: true });
   } catch (err: any) {
@@ -106,3 +109,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
   }
 }
+

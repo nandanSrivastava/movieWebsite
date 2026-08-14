@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useTheme } from 'next-themes';
-import { User, LogOut, LogIn, Ticket, Sun, Moon } from 'lucide-react';
+import { User, LogOut, LogIn, Ticket, Sun, Moon, Search } from 'lucide-react';
 
 export default function Header() {
   const pathname = usePathname();
@@ -453,16 +453,34 @@ export default function Header() {
                         <Ticket className="w-4 h-4" />
                         <span>My Tickets</span>
                       </Link>
+                      <Link 
+                        href="/booking/lookup" 
+                        className="hdr-dropdown-item"
+                        onClick={() => setDropdownOpen(false)}
+                      >
+                        <Search className="w-4 h-4" />
+                        <span>Find My Ticket</span>
+                      </Link>
                     </>
                   ) : (
-                    <Link 
-                      href={currentUrl} 
-                      className="hdr-dropdown-item"
-                      onClick={() => setDropdownOpen(false)}
-                    >
-                      <LogIn className="w-4 h-4" />
-                      <span>Sign In</span>
-                    </Link>
+                    <>
+                      <Link 
+                        href="/booking/lookup" 
+                        className="hdr-dropdown-item"
+                        onClick={() => setDropdownOpen(false)}
+                      >
+                        <Search className="w-4 h-4" />
+                        <span>Find My Ticket</span>
+                      </Link>
+                      <Link 
+                        href={currentUrl} 
+                        className="hdr-dropdown-item"
+                        onClick={() => setDropdownOpen(false)}
+                      >
+                        <LogIn className="w-4 h-4" />
+                        <span>Sign In</span>
+                      </Link>
+                    </>
                   )}
 
                   <div className="hdr-dropdown-item theme-toggle-row">
