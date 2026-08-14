@@ -7,6 +7,7 @@ import MockAuthSwitcher from "@/features/auth/components/MockAuthSwitcher";
 import { QueryProvider } from "@/features/shared/components/QueryProvider";
 import { Cinzel, Inter, Outfit, Playfair_Display } from "next/font/google";
 import { ThemeProvider } from "@/features/shared/components/ThemeProvider";
+import { Analytics } from "@vercel/analytics/next";
 
 const cinzel = Cinzel({ 
   subsets: ["latin"],
@@ -122,6 +123,7 @@ export default function RootLayout({
                 <AuthProvider>
                   {children}
                   <MockAuthSwitcher />
+                  <Analytics />
                 </AuthProvider>
               </ToastProvider>
             </QueryProvider>
