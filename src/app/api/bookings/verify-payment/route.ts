@@ -3,6 +3,7 @@ import { db } from '@/lib/db';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { rateLimiter } from '@/lib/rateLimit';
+import { sendBookingTicketEmail } from '@/lib/mailer';
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,6 +26,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (booking.payment_status === 'paid') {
+      // Ensure ticket email was sent if not already done
+      sendBookingTicketEmail(booking.id).catch(err => console.error('Error sending ticket email:', err));
       return NextResponse.json({ status: 'confirmed' });
     }
 
@@ -70,6 +73,12 @@ export async function POST(req: NextRequest) {
           paymentId,
           amount: booking.total_amount
         });
+
+        // Trigger confirmation email
+        sendBookingTicketEmail(booking.id).catch(emailErr => {
+          console.error('Failed to send confirmation email on payment verify:', emailErr);
+        });
+
         return NextResponse.json({ status: 'confirmed' });
       } else {
         // Refund logic if seats were swept

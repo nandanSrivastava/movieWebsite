@@ -3,26 +3,9 @@ import crypto from 'crypto';
 import { db, isMockMode } from '@/lib/db';
 import { createClient } from '@supabase/supabase-js';
 import Razorpay from 'razorpay';
-import { ticketConfirmationEmail } from '@/lib/email/templates';
-import { sendEmail, isEmailConfigured } from '@/lib/mailer';
+import { sendBookingTicketEmail } from '@/lib/mailer';
 
-function buildBookingEmailContext(booking: any) {
-  const seatsStr = booking.booking_seats
-    ?.map((bs: any) => `${bs.seat_layout?.row_label || ''}-${bs.seat_layout?.seat_number || ''}`)
-    .join(', ') || 'N/A';
 
-  return {
-    customerName: booking.customer_name,
-    bookingId: booking.id,
-    movieTitle: booking.show?.movie?.title || 'Movie',
-    screenName: booking.show?.screen?.name || 'Standard Screen',
-    showDate: booking.show?.show_date || '—',
-    showTime: booking.show?.show_time || '—',
-    seats: seatsStr,
-    totalAmount: Number(booking.total_amount),
-    qrToken: undefined as string | undefined,
-  };
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -135,6 +118,7 @@ export async function POST(req: NextRequest) {
 
     // If already finalized
     if (booking.payment_status === 'paid') {
+      sendBookingTicketEmail(booking.id).catch(err => console.error('Error sending ticket email on duplicate webhook:', err));
       return NextResponse.json({ received: true, status: 'already_paid' });
     }
 
@@ -160,35 +144,10 @@ export async function POST(req: NextRequest) {
         amount: booking.total_amount
       });
 
-      // Send ticket confirmation email (only when a real address exists —
-      // never email the placeholder, and never crash the webhook on mail failure)
-      let customerEmail: string | null = booking.customer_email || null;
-      if (!customerEmail && isSupabaseConfigured && booking.booked_by) {
-        const supabase = createClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
-        const { data: userData } = await supabase.auth.admin.getUserById(booking.booked_by);
-        if (userData?.user?.email) {
-          customerEmail = userData.user.email;
-        }
-      }
-
-      if (customerEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail) && isEmailConfigured()) {
-        try {
-          const { generateQRCodeDataUrl } = await import('@/features/shared/utils/qr');
-          const qrCodeDataUrl = await generateQRCodeDataUrl(qrToken);
-          const ctx = buildBookingEmailContext(booking);
-          const html = ticketConfirmationEmail({ ...ctx, qrCodeDataUrl, qrToken });
-          await sendEmail({
-            to: customerEmail,
-            subject: `Dhrub Cineplex — Ticket Confirmed (${ctx.movieTitle})`,
-            html
-          });
-        } catch (emailErr) {
-          console.error('Failed to send confirmation email:', emailErr);
-        }
-      }
+      // Send ticket confirmation email
+      sendBookingTicketEmail(booking.id).catch(emailErr => {
+        console.error('Failed to send confirmation email on webhook:', emailErr);
+      });
 
       return NextResponse.json({ received: true, status: 'confirmed' });
     } else {
