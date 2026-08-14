@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS public.seat_status (
   show_id         UUID NOT NULL REFERENCES public.shows(id) ON DELETE CASCADE,
   seat_layout_id  UUID NOT NULL REFERENCES public.seat_layout(id) ON DELETE CASCADE,
   status          TEXT NOT NULL DEFAULT 'available' CHECK (status IN ('available', 'locked', 'booked')),
-  locked_by       UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  locked_by       UUID,
   locked_at       TIMESTAMPTZ,
   lock_expires_at TIMESTAMPTZ,
   booking_id      UUID, -- FK added after bookings table exists (see below)
