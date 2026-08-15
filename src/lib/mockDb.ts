@@ -189,10 +189,9 @@ export class MockDatabase implements DatabaseClient {
     [today, tomorrow, dayAfter].forEach((date) => {
       showTimes.forEach((time, index) => {
         let movieId = m1;
-        if (index === 0) movieId = m1;
-        else if (index === 1) movieId = m2;
-        else if (index === 2) movieId = m3;
+        if (index === 1) movieId = m2;
         else if (index === 3) movieId = m4;
+        else movieId = m1; // 10:00:00 & 17:00:00 slots for Bahubali
 
         const id = `show-s1-${date}-${time.replace(/:/g, '-')}`;
         this.shows.set(id, {
@@ -220,6 +219,40 @@ export class MockDatabase implements DatabaseClient {
             booking_id: null
           });
         });
+
+        // Seed sample booking for Bahubali shows
+        if (movieId === m1) {
+          const bookingId = `mock-booking-${id}`;
+          const seatLayout1 = layouts[0]?.id;
+          const seatLayout2 = layouts[1]?.id;
+          if (seatLayout1 && seatLayout2) {
+            const newBooking: Booking = {
+              id: bookingId,
+              show_id: id,
+              booked_by: null,
+              booking_channel: 'online',
+              customer_name: 'Priya Sharma',
+              customer_phone: '+919812345678',
+              customer_email: 'priya.sharma@gmail.com',
+              total_amount: 300,
+              payment_status: 'paid',
+              razorpay_order_id: `order_mock_${id}`,
+              razorpay_payment_id: `pay_mock_${id}`,
+              client_idempotency_key: `idempotency_${id}`,
+              qr_code_token: `QR_BAHUBALI_${id}`,
+              created_at: new Date().toISOString()
+            };
+            this.bookings.set(bookingId, newBooking);
+            this.bookingSeats.push(
+              { booking_id: bookingId, seat_layout_id: seatLayout1, price: 150 },
+              { booking_id: bookingId, seat_layout_id: seatLayout2, price: 150 }
+            );
+            const status1 = this.seatStatuses.get(`${id}:${seatLayout1}`);
+            const status2 = this.seatStatuses.get(`${id}:${seatLayout2}`);
+            if (status1) { status1.status = 'booked'; status1.booking_id = bookingId; }
+            if (status2) { status2.status = 'booked'; status2.booking_id = bookingId; }
+          }
+        }
       });
     });
   }
