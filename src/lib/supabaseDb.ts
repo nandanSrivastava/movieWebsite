@@ -142,6 +142,12 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     return this.getShowById(newShow.id) as Promise<Show>;
   }
 
+  public async deleteShow(id: string): Promise<boolean> {
+    const { error } = await this.supabase.from('shows').delete().eq('id', id);
+    if (error) throw error;
+    return true;
+  }
+
   public async getSeatsForShow(showId: string): Promise<SeatStatus[]> {
     const data = await this.fetchWithRetry(() => 
       this.supabase

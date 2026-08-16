@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAdminStore } from '@/features/admin/store/adminStore';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { useQueryClient } from '@tanstack/react-query';
@@ -18,6 +18,38 @@ const getAuthHeaders = async (customHeaders: Record<string, string> = {}) => {
   return headers;
 };
 
+const PRESET_TIMES = [
+  { label: '10:00 AM', value: '10:00' },
+  { label: '01:30 PM', value: '13:30' },
+  { label: '05:00 PM', value: '17:00' },
+  { label: '08:30 PM', value: '20:30' },
+];
+
+const formatTime12h = (timeStr: string) => {
+  try {
+    const [hStr, mStr] = timeStr.split(':');
+    let h = parseInt(hStr);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return `${h.toString().padStart(2, '0')}:${mStr} ${ampm}`;
+  } catch {
+    return timeStr;
+  }
+};
+
+const getDatesInRange = (startStr: string, endStr: string): string[] => {
+  if (!startStr) return [];
+  if (!endStr || endStr < startStr) return [startStr];
+  const list: string[] = [];
+  let curr = new Date(startStr + 'T00:00:00');
+  const end = new Date(endStr + 'T00:00:00');
+  while (curr <= end) {
+    list.push(curr.toISOString().split('T')[0]);
+    curr.setDate(curr.getDate() + 1);
+  }
+  return list;
+};
+
 export default function AdminForms({ moviesList, screensList }: { moviesList: any[], screensList: any[] }) {
   const { showToast } = useToast();
   const queryClient = useQueryClient();
@@ -28,6 +60,35 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
     scheduleMovieId, scheduleScreenId, scheduleDate, scheduleTime, priceClassic, pricePremium, scheduleSubmitting,
     setScheduleField, resetScheduleForm, setScheduleSubmitting
   } = useAdminStore();
+
+  // Multi-day & Multi-time slot state
+  const [isMultiDate, setIsMultiDate] = useState(false);
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [selectedTimes, setSelectedTimes] = useState<string[]>(['10:00', '13:30', '17:00', '20:30']);
+  const [customTime, setCustomTime] = useState('');
+
+  useEffect(() => {
+    if (screensList.length > 0 && !scheduleScreenId) {
+      setScheduleField('scheduleScreenId', screensList[0].id);
+    }
+  }, [screensList, scheduleScreenId, setScheduleField]);
+
+  const toggleTimeSlot = (timeVal: string) => {
+    if (selectedTimes.includes(timeVal)) {
+      setSelectedTimes(selectedTimes.filter(t => t !== timeVal));
+    } else {
+      setSelectedTimes([...selectedTimes, timeVal].sort());
+    }
+  };
+
+  const handleAddCustomTime = () => {
+    if (!customTime) return;
+    if (!selectedTimes.includes(customTime)) {
+      setSelectedTimes([...selectedTimes, customTime].sort());
+    }
+    setCustomTime('');
+  };
 
   const handleCreateMovie = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,10 +128,36 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
 
   const handleCreateShow = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!scheduleMovieId || !scheduleScreenId || !scheduleDate || !scheduleTime) {
-      showToast('Please fill all required showtime fields.', 'error');
+    if (!scheduleMovieId) {
+      showToast('Please select a movie.', 'error');
       return;
     }
+    if (!scheduleScreenId) {
+      showToast('Please select a screen.', 'error');
+      return;
+    }
+
+    let targetDates: string[] = [];
+    if (isMultiDate) {
+      if (!startDate) {
+        showToast('Please select a Start Date for multi-day scheduling.', 'error');
+        return;
+      }
+      targetDates = getDatesInRange(startDate, endDate || startDate);
+    } else {
+      if (!scheduleDate) {
+        showToast('Please select a Show Date.', 'error');
+        return;
+      }
+      targetDates = [scheduleDate];
+    }
+
+    const targetTimes = selectedTimes.length > 0 ? selectedTimes : (scheduleTime ? [scheduleTime] : []);
+    if (targetTimes.length === 0) {
+      showToast('Please select at least one showtime slot.', 'error');
+      return;
+    }
+
     setScheduleSubmitting(true);
     try {
       const res = await fetch('/api/shows', {
@@ -79,26 +166,38 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
         body: JSON.stringify({
           movie_id: scheduleMovieId,
           screen_id: scheduleScreenId,
-          show_date: scheduleDate,
-          show_time: scheduleTime + ':00',
+          dates: targetDates,
+          times: targetTimes,
           price_classic: priceClassic,
-          price_premium: pricePremium,
-          price_normal: priceClassic,  // backward-compat
-          price_recliner: priceClassic  // backward-compat
+          price_premium: pricePremium
         })
       });
       const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error || 'Failed to schedule showtime.');
+      if (!res.ok) throw new Error(resData.error || 'Failed to schedule showtimes.');
 
-      showToast('Successfully scheduled showtime!', 'success');
+      const totalCount = resData.count || (targetDates.length * targetTimes.length);
+      showToast(`Successfully scheduled ${totalCount} showtime(s)!`, 'success');
+      
       resetScheduleForm();
+      setIsMultiDate(false);
+      setStartDate('');
+      setEndDate('');
+      setSelectedTimes(['10:00', '13:30', '17:00', '20:30']);
+      setCustomTime('');
       queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
     } catch (err: any) {
-      showToast(err.message || 'Failed to schedule showtime.', 'error');
+      showToast(err.message || 'Failed to schedule showtimes.', 'error');
     } finally {
       setScheduleSubmitting(false);
     }
   };
+
+  // Calculations for summary banner
+  const targetDatesCount = isMultiDate 
+    ? (startDate ? getDatesInRange(startDate, endDate || startDate).length : 0)
+    : (scheduleDate ? 1 : 0);
+  const targetTimesCount = selectedTimes.length;
+  const totalShowsToSchedule = targetDatesCount * targetTimesCount;
 
   return (
     <div style={{
@@ -129,11 +228,8 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
                 padding: '10px 14px',
                 fontSize: '0.9rem',
                 color: '#FFFFFF',
-                outline: 'none',
-                transition: 'border-color 0.2s'
+                outline: 'none'
               }}
-              onFocus={(e) => e.target.style.borderColor = 'var(--highlight-gold)'}
-              onBlur={(e) => e.target.style.borderColor = 'rgba(255,255,255,0.08)'}
             />
           </div>
 
@@ -155,8 +251,6 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
                 resize: 'vertical',
                 fontFamily: 'inherit'
               }}
-              onFocus={(e) => e.target.style.borderColor = 'var(--highlight-gold)'}
-              onBlur={(e) => e.target.style.borderColor = 'rgba(255,255,255,0.08)'}
             />
           </div>
 
@@ -311,73 +405,116 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
               boxShadow: '0 4px 12px rgba(212,175,55,0.2)',
               transition: 'all 0.2s'
             }}
-            onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-1px)'}
-            onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
           >
             {movieSubmitting ? 'Listing Movie...' : 'List Movie'}
           </button>
         </form>
       </div>
 
-      {/* SCHEDULE SHOWTIME FORM CARD */}
+      {/* BULK MULTI-DAY & MULTI-SHOWTIME SCHEDULING CARD */}
       <div className="card" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--bg-tertiary)', padding: '28px' }}>
         <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '22px', fontFamily: 'var(--font-family-heading)', color: 'var(--highlight-gold)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          ⏰ Schedule New Showtime
+          ⏰ Schedule Showtimes
         </h3>
         
         <form onSubmit={handleCreateShow} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Select Movie *</label>
-            <select
-              required
-              value={scheduleMovieId}
-              onChange={(e) => setScheduleField('scheduleMovieId', e.target.value)}
-              style={{
-                background: '#1F1F27',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '8px',
-                padding: '10px 14px',
-                fontSize: '0.9rem',
-                color: '#FFFFFF',
-                outline: 'none'
-              }}
-            >
-              <option value="">-- Choose Movie --</option>
-              {moviesList.map((movie: any) => (
-                <option key={movie.id} value={movie.id}>{movie.title}</option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Select Screen *</label>
-            <select
-              required
-              value={scheduleScreenId}
-              onChange={(e) => setScheduleField('scheduleScreenId', e.target.value)}
-              style={{
-                background: '#1F1F27',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: '8px',
-                padding: '10px 14px',
-                fontSize: '0.9rem',
-                color: '#FFFFFF',
-                outline: 'none'
-              }}
-            >
-              <option value="">-- Choose Screen --</option>
-              {screensList.map((screen: any) => (
-                <option key={screen.id} value={screen.id}>{screen.name}</option>
-              ))}
-            </select>
-          </div>
-
+          
+          {/* Select Movie & Screen */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Select Movie *</label>
+              <select
+                required
+                value={scheduleMovieId}
+                onChange={(e) => setScheduleField('scheduleMovieId', e.target.value)}
+                style={{
+                  background: '#1F1F27',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  fontSize: '0.9rem',
+                  color: '#FFFFFF',
+                  outline: 'none'
+                }}
+              >
+                <option value="">-- Choose Movie --</option>
+                {moviesList.map((movie: any) => (
+                  <option key={movie.id} value={movie.id}>{movie.title}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Select Screen *</label>
+              <select
+                required
+                value={scheduleScreenId}
+                onChange={(e) => setScheduleField('scheduleScreenId', e.target.value)}
+                style={{
+                  background: '#1F1F27',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: '8px',
+                  padding: '10px 14px',
+                  fontSize: '0.9rem',
+                  color: '#FFFFFF',
+                  outline: 'none'
+                }}
+              >
+                <option value="">-- Choose Screen --</option>
+                {screensList.map((screen: any) => (
+                  <option key={screen.id} value={screen.id}>{screen.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Date Selection Mode Toggle */}
+          <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+            <button
+              type="button"
+              onClick={() => setIsMultiDate(false)}
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: '1px solid',
+                borderColor: !isMultiDate ? 'var(--highlight-gold)' : 'rgba(255,255,255,0.1)',
+                backgroundColor: !isMultiDate ? 'rgba(212, 175, 55, 0.12)' : 'transparent',
+                color: !isMultiDate ? 'var(--highlight-gold)' : 'var(--text-muted)',
+                cursor: 'pointer'
+              }}
+            >
+              📅 Single Day
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsMultiDate(true)}
+              style={{
+                flex: 1,
+                padding: '8px 12px',
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                borderRadius: '6px',
+                border: '1px solid',
+                borderColor: isMultiDate ? 'var(--highlight-gold)' : 'rgba(255,255,255,0.1)',
+                backgroundColor: isMultiDate ? 'rgba(212, 175, 55, 0.12)' : 'transparent',
+                color: isMultiDate ? 'var(--highlight-gold)' : 'var(--text-muted)',
+                cursor: 'pointer'
+              }}
+            >
+              🗓️ Multiple Days (Date Range)
+            </button>
+          </div>
+
+          {/* Date Inputs */}
+          {!isMultiDate ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
               <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Show Date *</label>
               <input
                 type="date"
-                required
+                required={!isMultiDate}
                 value={scheduleDate}
                 onChange={(e) => setScheduleField('scheduleDate', e.target.value)}
                 style={{
@@ -391,27 +528,159 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
                 }}
               />
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Show Time *</label>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Start Date *</label>
+                <input
+                  type="date"
+                  required={isMultiDate}
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  style={{
+                    background: 'rgba(255,255,255,0.02)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '8px',
+                    padding: '9px 12px',
+                    fontSize: '0.9rem',
+                    color: '#FFFFFF',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>End Date *</label>
+                <input
+                  type="date"
+                  required={isMultiDate}
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  style={{
+                    background: 'rgba(255,255,255,0.02)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: '8px',
+                    padding: '9px 12px',
+                    fontSize: '0.9rem',
+                    color: '#FFFFFF',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Multiple Showtime Slots Selection */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+            <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              ⏰ Select Showtime Slots for Each Day *
+            </label>
+
+            {/* Quick Preset Time Buttons */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+              {PRESET_TIMES.map((preset) => {
+                const isActive = selectedTimes.includes(preset.value);
+                return (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    onClick={() => toggleTimeSlot(preset.value)}
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      borderRadius: '6px',
+                      border: isActive ? '1px solid var(--highlight-gold)' : '1px solid rgba(255,255,255,0.1)',
+                      backgroundColor: isActive ? 'rgba(212, 175, 55, 0.2)' : 'rgba(255,255,255,0.03)',
+                      color: isActive ? '#FFFFFF' : 'var(--text-muted)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    {isActive ? '✓ ' : '+ '}{preset.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom Time Slot Picker */}
+            <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
               <input
                 type="time"
-                required
-                value={scheduleTime}
-                onChange={(e) => setScheduleField('scheduleTime', e.target.value)}
+                value={customTime}
+                onChange={(e) => setCustomTime(e.target.value)}
                 style={{
                   background: 'rgba(255,255,255,0.02)',
                   border: '1px solid rgba(255,255,255,0.08)',
-                  borderRadius: '8px',
-                  padding: '9px 12px',
-                  fontSize: '0.9rem',
+                  borderRadius: '6px',
+                  padding: '6px 10px',
+                  fontSize: '0.85rem',
                   color: '#FFFFFF',
                   outline: 'none'
                 }}
               />
+              <button
+                type="button"
+                onClick={handleAddCustomTime}
+                disabled={!customTime}
+                style={{
+                  padding: '6px 14px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  backgroundColor: 'rgba(255,255,255,0.08)',
+                  color: '#FFFFFF',
+                  cursor: customTime ? 'pointer' : 'not-allowed',
+                  opacity: customTime ? 1 : 0.5
+                }}
+              >
+                + Add Custom Slot
+              </button>
             </div>
+
+            {/* Selected Times List Badges */}
+            {selectedTimes.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px' }}>
+                {selectedTimes.map((t) => (
+                  <span
+                    key={t}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '4px 10px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                      border: '1px solid rgba(16, 185, 129, 0.3)',
+                      color: '#10B981',
+                      fontSize: '0.78rem',
+                      fontWeight: 600
+                    }}
+                  >
+                    {formatTime12h(t)}
+                    <button
+                      type="button"
+                      onClick={() => toggleTimeSlot(t)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#10B981',
+                        cursor: 'pointer',
+                        fontWeight: 'bold',
+                        padding: 0,
+                        lineHeight: 1
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
-          <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--highlight-gold)', marginTop: '4px' }}>
+          {/* Seat Category Pricing */}
+          <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--highlight-gold)', marginTop: '8px' }}>
             🎟️ Seat Category Pricing (INR)
           </div>
 
@@ -454,6 +723,22 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
             </div>
           </div>
 
+          {/* Batch Summary Alert */}
+          {totalShowsToSchedule > 0 && (
+            <div style={{
+              marginTop: '10px',
+              padding: '10px 14px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(212, 175, 55, 0.1)',
+              border: '1px solid rgba(212, 175, 55, 0.25)',
+              fontSize: '0.82rem',
+              color: 'var(--highlight-gold)',
+              fontWeight: 600
+            }}>
+              ⚡ Quick Summary: Will create {totalShowsToSchedule} showtime(s) ({targetDatesCount} day(s) × {targetTimesCount} time slot(s)).
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={scheduleSubmitting}
@@ -466,14 +751,17 @@ export default function AdminForms({ moviesList, screensList }: { moviesList: an
               fontWeight: 700,
               fontSize: '0.9rem',
               cursor: 'pointer',
-              marginTop: '20px',
+              marginTop: '10px',
               boxShadow: '0 4px 12px rgba(212,175,55,0.2)',
               transition: 'all 0.2s'
             }}
-            onMouseOver={(e) => e.currentTarget.style.transform = 'translateY(-1px)'}
-            onMouseOut={(e) => e.currentTarget.style.transform = 'translateY(0)'}
           >
-            {scheduleSubmitting ? 'Scheduling...' : 'Schedule Showtime'}
+            {scheduleSubmitting 
+              ? 'Scheduling Showtimes...' 
+              : totalShowsToSchedule > 1 
+                ? `Schedule ${totalShowsToSchedule} Showtimes` 
+                : 'Schedule Showtime'
+            }
           </button>
         </form>
       </div>

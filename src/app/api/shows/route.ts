@@ -110,27 +110,71 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
     const body = await req.json();
-    const { movie_id, screen_id, show_date, show_time, price_classic, price_normal, price_premium, price_recliner } = body;
-
-    if (!movie_id || !screen_id || !show_date || !show_time) {
-      return NextResponse.json({ error: 'Missing required show fields' }, { status: 400 });
-    }
+    const { movie_id, screen_id, show_date, show_time, dates, times, price_classic, price_normal, price_premium, price_recliner } = body;
 
     const classicPrice = Number(price_classic ?? price_normal) || 150;
-    const newShow = await db.createShow({
-      movie_id,
-      screen_id,
-      show_date,
-      show_time,
-      price_classic: classicPrice,
-      price_premium: Number(price_premium) || 200,
-      price_normal: classicPrice,
-      price_recliner: classicPrice
-    } as any);
+    const premiumPrice = Number(price_premium) || 200;
 
-    return NextResponse.json({ success: true, show: newShow });
+    // Bulk creation if dates array or times array provided
+    const targetDates: string[] = (Array.isArray(dates) && dates.length > 0) ? dates : (show_date ? [show_date] : []);
+    const targetTimes: string[] = (Array.isArray(times) && times.length > 0) ? times : (show_time ? [show_time] : []);
+
+    if (!movie_id || !screen_id || targetDates.length === 0 || targetTimes.length === 0) {
+      return NextResponse.json({ error: 'Missing required show fields (movie, screen, dates, times)' }, { status: 400 });
+    }
+
+    const createdShows = [];
+    const errors = [];
+
+    for (const date of targetDates) {
+      for (const time of targetTimes) {
+        const formattedTime = time.length === 5 ? `${time}:00` : time;
+        try {
+          const newShow = await db.createShow({
+            movie_id,
+            screen_id,
+            show_date: date,
+            show_time: formattedTime,
+            price_classic: classicPrice,
+            price_premium: premiumPrice,
+            price_normal: classicPrice,
+            price_recliner: classicPrice
+          } as any);
+          createdShows.push(newShow);
+        } catch (err: any) {
+          errors.push({ date, time, error: err.message });
+        }
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      count: createdShows.length,
+      shows: createdShows,
+      skipped: errors.length > 0 ? errors : undefined
+    });
   } catch (err: any) {
     console.error('Create show error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to schedule showtime' }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Failed to schedule showtimes' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    if (!(await isAdmin(req))) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ error: 'Show ID is required' }, { status: 400 });
+    }
+
+    await db.deleteShow(id);
+    return NextResponse.json({ success: true, message: 'Showtime cancelled successfully' });
+  } catch (err: any) {
+    console.error('Delete show error:', err);
+    return NextResponse.json({ error: err.message || 'Cannot cancel showtime (it may have active bookings).' }, { status: 500 });
   }
 }

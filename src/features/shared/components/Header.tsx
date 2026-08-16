@@ -412,7 +412,7 @@ export default function Header() {
           <nav className="hdr-nav">
             {user?.role === 'admin' && (
               <Link href="/admin/dashboard" className={`hdr-nav-link ${isActive('/admin/dashboard') ? 'active' : ''}`}>
-                Command Center
+                Dashboard
               </Link>
             )}
             {user && ['admin', 'member'].includes(user.role) && (
@@ -452,14 +452,6 @@ export default function Header() {
                       >
                         <Ticket className="w-4 h-4" />
                         <span>My Tickets</span>
-                      </Link>
-                      <Link 
-                        href="/booking/lookup" 
-                        className="hdr-dropdown-item"
-                        onClick={() => setDropdownOpen(false)}
-                      >
-                        <Search className="w-4 h-4" />
-                        <span>Find My Ticket</span>
                       </Link>
                     </>
                   ) : (

@@ -113,6 +113,7 @@ export interface DatabaseClient {
   getShowsForMovie(movieId: string): Promise<Show[]>;
   getShowById(id: string): Promise<Show | null>;
   createShow(show: Omit<Show, 'id' | 'created_at'>): Promise<Show>;
+  deleteShow(id: string): Promise<boolean>;
   
   // Seat State
   getSeatsForShow(showId: string): Promise<SeatStatus[]>;

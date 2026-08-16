@@ -220,39 +220,7 @@ export class MockDatabase implements DatabaseClient {
           });
         });
 
-        // Seed sample booking for Bahubali shows
-        if (movieId === m1) {
-          const bookingId = `mock-booking-${id}`;
-          const seatLayout1 = layouts[0]?.id;
-          const seatLayout2 = layouts[1]?.id;
-          if (seatLayout1 && seatLayout2) {
-            const newBooking: Booking = {
-              id: bookingId,
-              show_id: id,
-              booked_by: null,
-              booking_channel: 'online',
-              customer_name: 'Priya Sharma',
-              customer_phone: '+919812345678',
-              customer_email: 'priya.sharma@gmail.com',
-              total_amount: 300,
-              payment_status: 'paid',
-              razorpay_order_id: `order_mock_${id}`,
-              razorpay_payment_id: `pay_mock_${id}`,
-              client_idempotency_key: `idempotency_${id}`,
-              qr_code_token: `QR_BAHUBALI_${id}`,
-              created_at: new Date().toISOString()
-            };
-            this.bookings.set(bookingId, newBooking);
-            this.bookingSeats.push(
-              { booking_id: bookingId, seat_layout_id: seatLayout1, price: 150 },
-              { booking_id: bookingId, seat_layout_id: seatLayout2, price: 150 }
-            );
-            const status1 = this.seatStatuses.get(`${id}:${seatLayout1}`);
-            const status2 = this.seatStatuses.get(`${id}:${seatLayout2}`);
-            if (status1) { status1.status = 'booked'; status1.booking_id = bookingId; }
-            if (status2) { status2.status = 'booked'; status2.booking_id = bookingId; }
-          }
-        }
+
       });
     });
   }
@@ -368,6 +336,16 @@ export class MockDatabase implements DatabaseClient {
     });
 
     return this.enrichShow(newShow);
+  }
+
+  public async deleteShow(id: string): Promise<boolean> {
+    this.shows.delete(id);
+    for (const key of Array.from(this.seatStatuses.keys())) {
+      if (key.startsWith(`${id}:`)) {
+        this.seatStatuses.delete(key);
+      }
+    }
+    return true;
   }
 
   private enrichShow(show: Show): Show {
