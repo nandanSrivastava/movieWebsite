@@ -112,67 +112,104 @@ export default function CounterPOSPage() {
     setCameraError(null);
     setIsCameraActive(true);
 
+    // Wait 120ms to ensure React updates DOM and renders #reader-qr-view container
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
     try {
       if (html5QrCodeRef.current) {
         if (html5QrCodeRef.current.isScanning) {
           await html5QrCodeRef.current.stop();
         }
-        html5QrCodeRef.current.clear();
-      }
-
-      // Step 1: Request camera stream directly to trigger browser permission prompt dialog
-      let tempStream: MediaStream | null = null;
-      if (typeof window !== 'undefined' && navigator?.mediaDevices?.getUserMedia) {
         try {
-          tempStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: { ideal: 'environment' } }
-          });
-        } catch (permErr: any) {
-          console.warn('getUserMedia permission error:', permErr);
-          const errStr = String(permErr?.message || permErr);
-          if (permErr?.name === 'NotAllowedError' || permErr?.name === 'PermissionDeniedError' || errStr.includes('Permission denied') || errStr.includes('NotAllowedError')) {
-            setCameraError('Camera access was blocked by Chrome or your Android OS system settings.');
-            setIsCameraActive(false);
-            return;
-          }
+          html5QrCodeRef.current.clear();
+        } catch (e) {
+          console.warn('Error clearing previous scanner instance:', e);
         }
+        html5QrCodeRef.current = null;
       }
 
-      // Step 2: Release temporary camera stream & wait for OS hardware lock release
-      if (tempStream) {
-        tempStream.getTracks().forEach(track => track.stop());
-        await new Promise(resolve => setTimeout(resolve, 150));
-      }
-
-      // Step 3: Initialize Html5Qrcode scanner
       const qrScanner = new Html5Qrcode('reader-qr-view');
       html5QrCodeRef.current = qrScanner;
 
-      await qrScanner.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: { width: 220, height: 220 },
-          aspectRatio: 1.0,
-        },
-        (decodedText) => {
-          if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
-            window.navigator.vibrate([100, 50, 100]);
-          }
-          const token = extractTokenFromScannedText(decodedText);
-          setTokenInput(token);
-          stopCameraScanner();
-          verifyTokenDirectly(token);
-        },
-        () => {}
-      );
+      const qrConfig = {
+        fps: 10,
+        qrbox: { width: 220, height: 220 },
+        aspectRatio: 1.0,
+      };
+
+      const qrSuccessCallback = (decodedText: string) => {
+        if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
+          window.navigator.vibrate([100, 50, 100]);
+        }
+        const token = extractTokenFromScannedText(decodedText);
+        setTokenInput(token);
+        stopCameraScanner();
+        verifyTokenDirectly(token);
+      };
+
+      let started = false;
+
+      // Strategy 1: Explicit Device ID resolution using Html5Qrcode.getCameras()
+      try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length > 0) {
+          const backCam = devices.find((d) =>
+            /back|rear|environment|0/i.test(d.label || '')
+          ) || devices[devices.length - 1] || devices[0];
+
+          await qrScanner.start(
+            backCam.id,
+            qrConfig,
+            qrSuccessCallback,
+            () => {}
+          );
+          started = true;
+        }
+      } catch (camListErr) {
+        console.warn('Html5Qrcode.getCameras resolution failed, falling back:', camListErr);
+      }
+
+      // Strategy 2: Constraint fallback (facingMode: environment)
+      if (!started) {
+        try {
+          await qrScanner.start(
+            { facingMode: 'environment' },
+            qrConfig,
+            qrSuccessCallback,
+            () => {}
+          );
+          started = true;
+        } catch (envErr) {
+          console.warn('facingMode environment constraint failed, falling back to user camera:', envErr);
+        }
+      }
+
+      // Strategy 3: Final fallback (facingMode: user)
+      if (!started) {
+        await qrScanner.start(
+          { facingMode: 'user' },
+          qrConfig,
+          qrSuccessCallback,
+          () => {}
+        );
+      }
     } catch (err: any) {
       console.error('Camera scanner init failed:', err);
-      let msg = 'Camera access denied or unavailable.';
-      const errStr = String(err?.message || err);
-      if (err?.name === 'NotAllowedError' || errStr.includes('Permission denied') || errStr.includes('NotAllowedError')) {
-        msg = 'Camera access was blocked by Chrome or your Android OS system settings.';
+      const errStr = String(err?.message || err || '');
+      const errName = err?.name || '';
+
+      let msg = 'Failed to start camera scanner.';
+
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError' || errStr.includes('Permission denied') || errStr.includes('NotAllowedError')) {
+        msg = 'Camera permission was denied or dismissed. Please ensure camera access is allowed in browser and site settings.';
+      } else if (errName === 'NotReadableError' || errStr.includes('NotReadableError') || errStr.includes('Could not start video source') || errStr.includes('in use')) {
+        msg = 'Camera hardware is busy or in use by another app (e.g. WhatsApp, Camera app). Please close background camera apps and try again.';
+      } else if (errName === 'NotFoundError' || errStr.includes('NotFoundError') || errStr.includes('Requested device not found')) {
+        msg = 'No physical camera detected on this device.';
+      } else if (errStr) {
+        msg = `Camera initialization error: ${errStr}`;
       }
+
       setCameraError(msg);
       setIsCameraActive(false);
     }
