@@ -131,7 +131,7 @@ export default function CounterPOSPage() {
           console.warn('getUserMedia permission error:', permErr);
           const errStr = String(permErr?.message || permErr);
           if (permErr?.name === 'NotAllowedError' || permErr?.name === 'PermissionDeniedError' || errStr.includes('Permission denied') || errStr.includes('NotAllowedError')) {
-            setCameraError('Camera access permission was denied or dismissed. Please allow camera permission in site settings or enter ticket token manually below.');
+            setCameraError('Camera access was blocked by Chrome or your Android OS system settings.');
             setIsCameraActive(false);
             return;
           }
@@ -171,7 +171,7 @@ export default function CounterPOSPage() {
       let msg = 'Camera access denied or unavailable.';
       const errStr = String(err?.message || err);
       if (err?.name === 'NotAllowedError' || errStr.includes('Permission denied') || errStr.includes('NotAllowedError')) {
-        msg = 'Camera access was blocked. Please allow camera access in browser site settings or enter ticket token manually below.';
+        msg = 'Camera access was blocked by Chrome or your Android OS system settings.';
       }
       setCameraError(msg);
       setIsCameraActive(false);
@@ -718,8 +718,25 @@ export default function CounterPOSPage() {
                 </div>
 
                 {cameraError && (
-                  <div className="mb-4 rounded-lg bg-rose-500/10 border border-rose-500/20 p-3 text-xs text-rose-400 text-center" style={{ padding: '10px', borderRadius: '8px', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#EF4444', fontSize: '0.78rem', marginBottom: '12px', textAlign: 'center' }}>
-                    {cameraError}
+                  <div className="mb-4 rounded-xl bg-rose-950/40 border border-rose-500/30 p-3.5 text-xs text-rose-200 text-left" style={{ padding: '14px', borderRadius: '12px', backgroundColor: 'rgba(153, 27, 27, 0.25)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#FECDD3', fontSize: '0.8rem', marginBottom: '16px' }}>
+                    <div className="flex items-center gap-2 font-bold text-rose-400 mb-1.5" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#F87171', fontWeight: 700, marginBottom: '6px', fontSize: '0.88rem' }}>
+                      <XCircle className="h-4 w-4 flex-shrink-0" style={{ width: '18px', height: '18px', color: '#F87171' }} />
+                      <span>{cameraError}</span>
+                    </div>
+
+                    <div className="mt-2.5 rounded-lg bg-slate-950/80 p-3 border border-slate-800 text-[11px] text-slate-300 space-y-2" style={{ backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px 12px', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)', fontSize: '0.75rem', color: '#D1D5DB', marginTop: '10px' }}>
+                      <div className="font-semibold text-amber-400 uppercase tracking-wider" style={{ color: '#F59E0B', fontWeight: 700, fontSize: '0.7rem', marginBottom: '4px' }}>
+                        💡 How to enable camera access:
+                      </div>
+                      <div style={{ margin: '4px 0 6px 0', lineHeight: '1.4' }}>
+                        <strong className="text-white" style={{ color: '#FFFFFF' }}>1. Android Phone System Permission (Required):</strong><br />
+                        Open phone <strong>Settings ⚙️</strong> → <strong>Apps</strong> → <strong>Chrome</strong> → <strong>Permissions</strong> → <strong>Camera</strong> → Select <strong>&quot;Allow only while using the app&quot;</strong>.
+                      </div>
+                      <div style={{ lineHeight: '1.4' }}>
+                        <strong className="text-white" style={{ color: '#FFFFFF' }}>2. Chrome Browser Site Permission:</strong><br />
+                        Tap the <strong>🔒 icon</strong> next to the web address → <strong>Permissions / Site settings</strong> → <strong>Camera</strong> → Select <strong>Allow</strong>.
+                      </div>
+                    </div>
                   </div>
                 )}
 
