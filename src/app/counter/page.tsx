@@ -120,27 +120,36 @@ export default function CounterPOSPage() {
         html5QrCodeRef.current.clear();
       }
 
-      // Query cameras to trigger native browser permission dialog
-      const devices = await Html5Qrcode.getCameras();
-      if (!devices || devices.length === 0) {
-        setCameraError('No camera devices detected on this device.');
-        setIsCameraActive(false);
-        return;
+      // Step 1: Request camera stream directly to trigger browser permission prompt dialog
+      let tempStream: MediaStream | null = null;
+      if (typeof window !== 'undefined' && navigator?.mediaDevices?.getUserMedia) {
+        try {
+          tempStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' } }
+          });
+        } catch (permErr: any) {
+          console.warn('getUserMedia permission error:', permErr);
+          const errStr = String(permErr?.message || permErr);
+          if (permErr?.name === 'NotAllowedError' || permErr?.name === 'PermissionDeniedError' || errStr.includes('Permission denied') || errStr.includes('NotAllowedError')) {
+            setCameraError('Camera access permission was denied or dismissed. Please allow camera permission in site settings or enter ticket token manually below.');
+            setIsCameraActive(false);
+            return;
+          }
+        }
       }
 
-      // Find back/rear camera or fallback to available camera
-      const selectedCam = devices.find(d => 
-        d.label.toLowerCase().includes('back') || 
-        d.label.toLowerCase().includes('rear') || 
-        d.label.toLowerCase().includes('environment')
-      ) || devices[devices.length - 1] || devices[0];
+      // Step 2: Release temporary camera stream & wait for OS hardware lock release
+      if (tempStream) {
+        tempStream.getTracks().forEach(track => track.stop());
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
 
-      const cameraId = selectedCam.id;
+      // Step 3: Initialize Html5Qrcode scanner
       const qrScanner = new Html5Qrcode('reader-qr-view');
       html5QrCodeRef.current = qrScanner;
 
       await qrScanner.start(
-        cameraId,
+        { facingMode: 'environment' },
         {
           fps: 10,
           qrbox: { width: 220, height: 220 },
@@ -162,7 +171,7 @@ export default function CounterPOSPage() {
       let msg = 'Camera access denied or unavailable.';
       const errStr = String(err?.message || err);
       if (err?.name === 'NotAllowedError' || errStr.includes('Permission denied') || errStr.includes('NotAllowedError')) {
-        msg = 'Camera permission prompt was dismissed or blocked. Tap Allow when prompted, or enter ticket token manually below.';
+        msg = 'Camera access was blocked. Please allow camera access in browser site settings or enter ticket token manually below.';
       }
       setCameraError(msg);
       setIsCameraActive(false);
