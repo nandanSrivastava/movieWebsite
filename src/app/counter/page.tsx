@@ -112,6 +112,19 @@ export default function CounterPOSPage() {
     setCameraError(null);
     setIsCameraActive(true);
 
+    try {
+      if (typeof window !== 'undefined' && navigator?.mediaDevices?.getUserMedia) {
+        await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      }
+    } catch (permErr: any) {
+      console.warn('Camera permission prompt error:', permErr);
+      if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
+        setCameraError('Camera access was blocked by your browser. Please tap the lock/camera icon in your browser URL bar to Allow Camera Access, then try again.');
+        setIsCameraActive(false);
+        return;
+      }
+    }
+
     setTimeout(async () => {
       try {
         const qrScanner = new Html5Qrcode('reader-qr-view');
@@ -140,10 +153,10 @@ export default function CounterPOSPage() {
         );
       } catch (err: any) {
         console.error('Camera scanner init failed:', err);
-        setCameraError('Camera access denied or unavailable. You can enter the token manually below.');
+        setCameraError('Camera permission blocked or camera unavailable. Please enable camera access in site settings or enter the ticket token manually below.');
         setIsCameraActive(false);
       }
-    }, 300);
+    }, 200);
   };
 
   const stopCameraScanner = async () => {
