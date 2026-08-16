@@ -114,7 +114,9 @@ export default function CounterPOSPage() {
 
     try {
       if (typeof window !== 'undefined' && navigator?.mediaDevices?.getUserMedia) {
-        await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        // Stop temporary stream after obtaining permission so Html5Qrcode can bind
+        stream.getTracks().forEach(track => track.stop());
       }
     } catch (permErr: any) {
       console.warn('Camera permission prompt error:', permErr);
@@ -125,38 +127,36 @@ export default function CounterPOSPage() {
       }
     }
 
-    setTimeout(async () => {
-      try {
-        const qrScanner = new Html5Qrcode('reader-qr-view');
-        html5QrCodeRef.current = qrScanner;
-
-        await qrScanner.start(
-          { facingMode: 'environment' },
-          {
-            fps: 10,
-            qrbox: { width: 220, height: 220 },
-            aspectRatio: 1.0,
-          },
-          (decodedText) => {
-            // Trigger haptic vibration on mobile
-            if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
-              window.navigator.vibrate([100, 50, 100]);
-            }
-            const token = extractTokenFromScannedText(decodedText);
-            setTokenInput(token);
-            stopCameraScanner();
-            verifyTokenDirectly(token);
-          },
-          () => {
-            // Ignore scan frame failures
-          }
-        );
-      } catch (err: any) {
-        console.error('Camera scanner init failed:', err);
-        setCameraError('Camera permission blocked or camera unavailable. Please enable camera access in site settings or enter the ticket token manually below.');
-        setIsCameraActive(false);
+    try {
+      if (html5QrCodeRef.current?.isScanning) {
+        await html5QrCodeRef.current.stop();
       }
-    }, 200);
+      const qrScanner = new Html5Qrcode('reader-qr-view');
+      html5QrCodeRef.current = qrScanner;
+
+      await qrScanner.start(
+        { facingMode: 'environment' },
+        {
+          fps: 10,
+          qrbox: { width: 220, height: 220 },
+          aspectRatio: 1.0,
+        },
+        (decodedText) => {
+          if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
+            window.navigator.vibrate([100, 50, 100]);
+          }
+          const token = extractTokenFromScannedText(decodedText);
+          setTokenInput(token);
+          stopCameraScanner();
+          verifyTokenDirectly(token);
+        },
+        () => {}
+      );
+    } catch (err: any) {
+      console.error('Camera scanner init failed:', err);
+      setCameraError('Camera permission blocked or camera unavailable. Please allow camera access in site settings or enter the ticket token manually below.');
+      setIsCameraActive(false);
+    }
   };
 
   const stopCameraScanner = async () => {
@@ -680,15 +680,23 @@ export default function CounterPOSPage() {
                 </div>
 
                 {/* LIVE CAMERA VIEW CONTAINER */}
-                {isCameraActive && (
-                  <div className="mb-4 rounded-xl border border-amber-400/40 bg-slate-950 p-2 overflow-hidden shadow-inner text-center" style={{ marginBottom: '14px', borderRadius: '14px', border: '1px solid rgba(245, 158, 11, 0.4)', backgroundColor: '#000000', padding: '6px' }}>
-                    <div id="reader-qr-view" className="w-full"></div>
-                    <div className="mt-2 text-[11px] font-medium text-amber-400 flex items-center justify-center gap-1" style={{ fontSize: '0.75rem', color: '#F59E0B', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginTop: '6px' }}>
-                      <Sparkles className="h-3 w-3 animate-spin" style={{ width: '12px', height: '12px' }} />
-                      <span>Point camera directly at customer&apos;s ticket QR code</span>
-                    </div>
+                <div
+                  className="mb-4 rounded-xl border border-amber-400/40 bg-slate-950 p-2 overflow-hidden shadow-inner text-center"
+                  style={{
+                    marginBottom: '14px',
+                    borderRadius: '14px',
+                    border: '1px solid rgba(245, 158, 11, 0.4)',
+                    backgroundColor: '#000000',
+                    padding: '6px',
+                    display: isCameraActive ? 'block' : 'none'
+                  }}
+                >
+                  <div id="reader-qr-view" className="w-full"></div>
+                  <div className="mt-2 text-[11px] font-medium text-amber-400 flex items-center justify-center gap-1" style={{ fontSize: '0.75rem', color: '#F59E0B', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', marginTop: '6px' }}>
+                    <Sparkles className="h-3 w-3 animate-spin" style={{ width: '12px', height: '12px' }} />
+                    <span>Point camera directly at customer&apos;s ticket QR code</span>
                   </div>
-                )}
+                </div>
 
                 {cameraError && (
                   <div className="mb-4 rounded-lg bg-rose-500/10 border border-rose-500/20 p-3 text-xs text-rose-400 text-center" style={{ padding: '10px', borderRadius: '8px', backgroundColor: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: '#EF4444', fontSize: '0.78rem', marginBottom: '12px', textAlign: 'center' }}>
