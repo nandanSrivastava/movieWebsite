@@ -89,14 +89,23 @@ export default function CounterPOSPage() {
 
   const extractTokenFromScannedText = (scannedText: string): string => {
     try {
-      if (scannedText.includes('token=')) {
-        const url = new URL(scannedText);
-        return url.searchParams.get('token') || scannedText.trim();
+      const text = scannedText.trim();
+      if (text.includes('token=')) {
+        const url = new URL(text);
+        return url.searchParams.get('token') || text;
       }
+      if (text.includes('id=')) {
+        const url = new URL(text);
+        return url.searchParams.get('id') || text;
+      }
+      if (text.includes('booking/')) {
+        const parts = text.split('/');
+        return parts[parts.length - 1] || text;
+      }
+      return text;
     } catch {
-      // Fallback if not valid URL
+      return scannedText.trim();
     }
-    return scannedText.trim();
   };
 
   const startCameraScanner = async () => {
