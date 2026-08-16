@@ -142,6 +142,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           role = 'member';
           name = 'Counter Operator 1';
           id = 'd0e56e07-6bcf-40a2-8b8b-d784fa734e57';
+        } else {
+          // Check if this email was onboarded as a member via API
+          try {
+            const mockSessionObj = { role: 'admin' };
+            const res = await fetch('/api/admin/members', {
+              headers: {
+                'Cookie': `cinebook_mock_session=${JSON.stringify(mockSessionObj)}`
+              }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const foundMember = data.members?.find((m: any) => m.email?.toLowerCase() === email.trim().toLowerCase());
+              if (foundMember) {
+                role = 'member';
+                name = foundMember.full_name || 'Counter Operator';
+                phone = foundMember.phone || phone;
+                id = foundMember.id;
+              }
+            }
+          } catch (e) {
+            // fallback to default user role
+          }
         }
 
         const newUser: AuthUser = { id, email, full_name: name, phone, role };

@@ -1,6 +1,7 @@
 // ── DATA TYPE INTERFACES ─────────────────────────────────────
 export interface Profile {
   id: string;
+  email?: string;
   full_name: string;
   phone: string;
   role: 'admin' | 'member' | 'user';
@@ -118,7 +119,7 @@ export interface DatabaseClient {
   // Seat State
   getSeatsForShow(showId: string): Promise<SeatStatus[]>;
   lockSeats(showId: string, seatLayoutIds: string[], userId: string, holdSeconds?: number): Promise<boolean>;
-  unlockSeats(showId: string, seatLayoutIds: string[], userId: string): Promise<boolean>;
+  unlockSeats(showId: string, seatLayoutIds: string[], userId: string, force?: boolean): Promise<boolean>;
   
   // Bookings
   createBooking(
@@ -135,11 +136,14 @@ export interface DatabaseClient {
   getBookings(): Promise<Booking[]>;
   getBookingsByUser(userId: string): Promise<Booking[]>;
 
-  // Profiles
+  // Profiles & Onboarding
   getProfile(id: string): Promise<Profile | null>;
-  createProfile(id: string, fullName: string, phone: string, role?: Profile['role']): Promise<Profile>;
+  getProfileByEmail?(email: string): Promise<Profile | null>;
+  createProfile(id: string, fullName: string, phone: string, role?: Profile['role'], email?: string): Promise<Profile>;
   updateProfileRole(id: string, role: Profile['role']): Promise<Profile>;
   getProfiles(): Promise<Profile[]>;
+  getMembers(): Promise<Profile[]>;
+  onboardMember(email: string, fullName: string, phone: string): Promise<Profile>;
 
   // Audit
   logAudit(userId: string | null, action: string, details: any, ip?: string): Promise<void>;

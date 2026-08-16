@@ -84,21 +84,27 @@ export default function Header() {
           border: 1px solid var(--border-subtle);
           box-shadow: 0 4px 30px rgba(0,0,0,0.1);
         }
-        @media (max-width: 768px) {
+        @media (max-width: 850px) {
           .site-header {
-            top: 12px;
-            width: calc(100% - 24px);
-            border-radius: 16px;
+            top: max(8px, env(safe-area-inset-top));
+            width: calc(100% - 16px);
+            height: 60px;
+            border-radius: 14px;
+            padding: 0 12px;
           }
           .hdr-nav {
-            display: none;
+            display: none !important;
           }
           .hdr-logo-name {
-            font-size: 1.1rem;
+            font-size: 1.05rem;
           }
           .hdr-logo-sub {
-            font-size: 0.55rem;
-            letter-spacing: 0.12em;
+            font-size: 0.52rem;
+            letter-spacing: 0.1em;
+          }
+          .hdr-logo-mark {
+            width: 32px !important;
+            height: 32px !important;
           }
         }
         .site-header.scrolled {
@@ -445,6 +451,26 @@ export default function Header() {
                           {user.role}
                         </span>
                       </div>
+                      {user.role === 'admin' && (
+                        <Link 
+                          href="/admin/dashboard" 
+                          className="hdr-dropdown-item"
+                          onClick={() => setDropdownOpen(false)}
+                        >
+                          <Ticket className="w-4 h-4 text-gold-500" />
+                          <span>Admin Dashboard</span>
+                        </Link>
+                      )}
+                      {['admin', 'member'].includes(user.role) && (
+                        <Link 
+                          href="/counter" 
+                          className="hdr-dropdown-item"
+                          onClick={() => setDropdownOpen(false)}
+                        >
+                          <Ticket className="w-4 h-4 text-emerald-400" />
+                          <span>Box Office POS</span>
+                        </Link>
+                      )}
                       <Link 
                         href="/account/bookings" 
                         className="hdr-dropdown-item"
@@ -519,7 +545,17 @@ export default function Header() {
 
         </div>
       </header>
-      {pathname !== '/' && <div style={{ height: '110px' }} />}
+      <style dangerouslySetInnerHTML={{ __html: `
+        .header-spacer {
+          height: 105px;
+        }
+        @media (max-width: 850px) {
+          .header-spacer {
+            height: 76px;
+          }
+        }
+      `}} />
+      {pathname !== '/' && <div className="header-spacer" />}
     </>
   );
 }

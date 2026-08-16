@@ -30,6 +30,7 @@ export class MockDatabase implements DatabaseClient {
     const memberId = 'd0e56e07-6bcf-40a2-8b8b-d784fa734e57';
     this.profiles.set(adminId, {
       id: adminId,
+      email: 'admin@cinebook.com',
       full_name: 'System Administrator',
       phone: '+919999999999',
       role: 'admin',
@@ -38,6 +39,7 @@ export class MockDatabase implements DatabaseClient {
     });
     this.profiles.set(memberId, {
       id: memberId,
+      email: 'member@cinebook.com',
       full_name: 'Counter Operator 1',
       phone: '+918888888888',
       role: 'member',
@@ -400,10 +402,10 @@ export class MockDatabase implements DatabaseClient {
     return true;
   }
 
-  public async unlockSeats(showId: string, seatLayoutIds: string[], userId: string): Promise<boolean> {
+  public async unlockSeats(showId: string, seatLayoutIds: string[], userId: string, force = false): Promise<boolean> {
     seatLayoutIds.forEach((layoutId) => {
       const current = this.seatStatuses.get(`${showId}:${layoutId}`);
-      if (current && current.status === 'locked' && current.locked_by === userId) {
+      if (current && current.status === 'locked' && (force || current.locked_by === userId)) {
         current.status = 'available';
         current.locked_by = null;
         current.locked_at = null;
@@ -578,9 +580,20 @@ export class MockDatabase implements DatabaseClient {
     return this.profiles.get(id) || null;
   }
 
-  public async createProfile(id: string, fullName: string, phone: string, role: Profile['role'] = 'user'): Promise<Profile> {
+  public async getProfileByEmail(email: string): Promise<Profile | null> {
+    const target = email.toLowerCase().trim();
+    for (const profile of this.profiles.values()) {
+      if (profile.email && profile.email.toLowerCase().trim() === target) {
+        return profile;
+      }
+    }
+    return null;
+  }
+
+  public async createProfile(id: string, fullName: string, phone: string, role: Profile['role'] = 'user', email?: string): Promise<Profile> {
     const newProfile: Profile = {
       id,
+      email,
       full_name: fullName,
       phone,
       role,
@@ -601,6 +614,25 @@ export class MockDatabase implements DatabaseClient {
 
   public async getProfiles(): Promise<Profile[]> {
     return Array.from(this.profiles.values());
+  }
+
+  public async getMembers(): Promise<Profile[]> {
+    return Array.from(this.profiles.values()).filter(p => p.role === 'member');
+  }
+
+  public async onboardMember(email: string, fullName: string, phone: string): Promise<Profile> {
+    const id = `member-${Math.random().toString(36).substring(2, 9)}`;
+    const newMember: Profile = {
+      id,
+      email,
+      full_name: fullName,
+      phone,
+      role: 'member',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    this.profiles.set(id, newMember);
+    return newMember;
   }
 
   public async logAudit(userId: string | null, action: string, details: any, ip: string | null = null): Promise<void> {

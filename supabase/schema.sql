@@ -32,6 +32,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- Mirrors auth.users; created automatically via trigger on signup
 CREATE TABLE IF NOT EXISTS public.profiles (
   id            UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email         TEXT,
   full_name     TEXT NOT NULL DEFAULT '',
   phone         TEXT NOT NULL DEFAULT '',
   role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'member', 'user')),
@@ -46,14 +47,18 @@ LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
-  INSERT INTO public.profiles (id, full_name, phone, role)
+  INSERT INTO public.profiles (id, email, full_name, phone, role)
   VALUES (
     NEW.id,
+    NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
     COALESCE(NEW.raw_user_meta_data->>'phone', ''),
     'user'
   )
-  ON CONFLICT (id) DO NOTHING;
+  ON CONFLICT (id) DO UPDATE SET
+    email = EXCLUDED.email,
+    full_name = COALESCE(EXCLUDED.full_name, profiles.full_name),
+    phone = COALESCE(EXCLUDED.phone, profiles.phone);
   RETURN NEW;
 END;
 $$;

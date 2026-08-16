@@ -64,8 +64,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No session to unlock seats.' }, { status: 401 });
     }
 
+    // Check if requester is admin
+    let isAdmin = false;
+    if (userId) {
+      const profile = await db.getProfile(userId);
+      if (profile?.role === 'admin') isAdmin = true;
+    }
+
     // 3. Unlock Seats
-    await db.unlockSeats(showId, seatLayoutIds, userId);
+    await db.unlockSeats(showId, seatLayoutIds, userId, isAdmin);
 
     // 4. Log Audit Event
     const ip = req.headers.get('x-forwarded-for') || 'unknown';

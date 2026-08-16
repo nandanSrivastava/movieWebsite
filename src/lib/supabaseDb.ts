@@ -182,14 +182,18 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     return data;
   }
 
-  public async unlockSeats(showId: string, seatLayoutIds: string[], userId: string): Promise<boolean> {
-    const { error } = await this.supabase
+  public async unlockSeats(showId: string, seatLayoutIds: string[], userId: string, force = false): Promise<boolean> {
+    let query = this.supabase
       .from('seat_status')
       .update({ status: 'available', locked_by: null, locked_at: null, lock_expires_at: null })
       .eq('show_id', showId)
-      .eq('locked_by', userId)
       .in('seat_layout_id', seatLayoutIds);
-    
+
+    if (!force) {
+      query = query.eq('locked_by', userId);
+    }
+
+    const { error } = await query;
     return !error;
   }
 
@@ -352,13 +356,27 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     return data;
   }
 
-  public async createProfile(id: string, fullName: string, phone: string, role: Profile['role'] = 'user'): Promise<Profile> {
-    const { data, error } = await this.supabase.from('profiles').insert({
-      id,
-      full_name: fullName,
-      phone,
-      role
-    }).select().single();
+  public async getProfileByEmail(email: string): Promise<Profile | null> {
+    try {
+      const { data, error } = await this.supabase.from('profiles').select('*').eq('email', email.trim().toLowerCase()).maybeSingle();
+      if (error && error.code !== 'PGRST116') return null;
+      return data || null;
+    } catch {
+      return null;
+    }
+  }
+
+  public async createProfile(id: string, fullName: string, phone: string, role: Profile['role'] = 'user', email?: string): Promise<Profile> {
+    const payload: any = { id, full_name: fullName, phone, role };
+    if (email) payload.email = email;
+
+    let { data, error } = await this.supabase.from('profiles').insert(payload).select().single();
+    if (error && error.message?.includes('email')) {
+      delete payload.email;
+      const res = await this.supabase.from('profiles').insert(payload).select().single();
+      data = res.data ? { ...res.data, email } : null;
+      error = res.error;
+    }
 
     if (error) throw error;
     return data;
@@ -380,6 +398,22 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     const { data, error } = await this.supabase.from('profiles').select('*').order('created_at', { ascending: false });
     if (error) throw error;
     return data;
+  }
+
+  public async getMembers(): Promise<Profile[]> {
+    const { data, error } = await this.supabase.from('profiles').select('*').eq('role', 'member').order('created_at', { ascending: false });
+    if (error) throw error;
+    return data;
+  }
+
+  public async onboardMember(email: string, fullName: string, phone: string): Promise<Profile> {
+    // Note: User Auth creation is handled by API route using Supabase Admin Auth API.
+    const existingProfile = await this.getProfileByEmail(email);
+    if (existingProfile) {
+      return this.updateProfileRole(existingProfile.id, 'member');
+    }
+    const id = `member-${Math.random().toString(36).substring(2, 9)}`;
+    return this.createProfile(id, fullName, phone, 'member', email);
   }
 
   public async logAudit(userId: string | null, action: string, details: any, ip?: string): Promise<void> {
