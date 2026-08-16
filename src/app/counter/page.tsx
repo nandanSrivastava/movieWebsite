@@ -113,24 +113,13 @@ export default function CounterPOSPage() {
     setIsCameraActive(true);
 
     try {
-      if (typeof window !== 'undefined' && navigator?.mediaDevices?.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        // Stop temporary stream after obtaining permission so Html5Qrcode can bind
-        stream.getTracks().forEach(track => track.stop());
+      if (html5QrCodeRef.current) {
+        if (html5QrCodeRef.current.isScanning) {
+          await html5QrCodeRef.current.stop();
+        }
+        html5QrCodeRef.current.clear();
       }
-    } catch (permErr: any) {
-      console.warn('Camera permission prompt error:', permErr);
-      if (permErr.name === 'NotAllowedError' || permErr.name === 'PermissionDeniedError') {
-        setCameraError('Camera access was blocked by your browser. Please tap the lock/camera icon in your browser URL bar to Allow Camera Access, then try again.');
-        setIsCameraActive(false);
-        return;
-      }
-    }
 
-    try {
-      if (html5QrCodeRef.current?.isScanning) {
-        await html5QrCodeRef.current.stop();
-      }
       const qrScanner = new Html5Qrcode('reader-qr-view');
       html5QrCodeRef.current = qrScanner;
 
@@ -154,7 +143,12 @@ export default function CounterPOSPage() {
       );
     } catch (err: any) {
       console.error('Camera scanner init failed:', err);
-      setCameraError('Camera permission blocked or camera unavailable. Please allow camera access in site settings or enter the ticket token manually below.');
+      let msg = 'Camera access denied or unavailable.';
+      const errStr = String(err?.message || err);
+      if (err?.name === 'NotAllowedError' || errStr.includes('Permission denied') || errStr.includes('NotAllowedError')) {
+        msg = 'Camera permission is blocked in your mobile browser. On Android Chrome, tap ⁝ (top right) → Settings → Site settings → Camera → Allow for dhrubcineplex.in';
+      }
+      setCameraError(msg);
       setIsCameraActive(false);
     }
   };
