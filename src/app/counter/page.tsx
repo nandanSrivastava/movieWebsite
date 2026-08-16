@@ -59,6 +59,20 @@ export default function CounterPOSPage() {
 
   const shows = showsData || [];
 
+  // Fetch recent confirmed bookings for fast gate entry lookup
+  const { data: recentBookingsData, isLoading: loadingRecentBookings } = useQuery({
+    queryKey: ['counterRecentBookings'],
+    queryFn: async () => {
+      const res = await fetch('/api/counter/bookings');
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.bookings || [];
+    },
+    enabled: !!user && ['admin', 'member'].includes(user.role) && activeTab === 'verification',
+  });
+
+  const recentBookings = recentBookingsData || [];
+
   // Redirect non-staff/non-admins
   useEffect(() => {
     if (!authLoading && (!user || !['admin', 'member'].includes(user.role))) {
@@ -779,14 +793,14 @@ export default function CounterPOSPage() {
 
                 {/* MANUAL TOKEN ENTRY FORM */}
                 <form onSubmit={handleVerifySubmit} className="mb-4" style={{ marginBottom: '16px' }}>
-                  <div style={{ fontSize: '0.7rem', color: '#9CA3AF', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
-                    Or Enter Ticket Token Manually:
+                  <div style={{ fontSize: '0.72rem', color: '#F59E0B', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px' }}>
+                    ⚡ Manual Ticket Verification:
                   </div>
 
                   <div className="flex flex-col sm:flex-row gap-2" style={{ display: 'flex', gap: '10px' }}>
                     <input
                       type="text"
-                      placeholder="Enter Ticket Token (e.g. tkt_xxxx)"
+                      placeholder="Enter Customer Phone, Name, or last 4-6 chars of Ticket..."
                       value={tokenInput}
                       onChange={(e) => setTokenInput(e.target.value)}
                       disabled={verifying}
@@ -811,6 +825,15 @@ export default function CounterPOSPage() {
                         </>
                       )}
                     </button>
+                  </div>
+
+                  <div className="mt-2 rounded-lg bg-amber-400/10 p-2.5 border border-amber-400/20 text-[11px] text-amber-300" style={{ marginTop: '8px', padding: '8px 10px', borderRadius: '8px', backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', fontSize: '0.74rem', color: '#FCD34D' }}>
+                    💡 <strong>No need to type full long token!</strong> You can now type:
+                    <div className="mt-1 flex flex-wrap gap-2 text-[10px]" style={{ marginTop: '4px', display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '0.7rem' }}>
+                      <span className="rounded bg-slate-900 px-1.5 py-0.5 border border-amber-400/30 text-white" style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#090D16', color: '#FFFFFF' }}>📱 Phone Number (e.g. 9876543210)</span>
+                      <span className="rounded bg-slate-900 px-1.5 py-0.5 border border-amber-400/30 text-white" style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#090D16', color: '#FFFFFF' }}>👤 Customer Name (e.g. Rajesh)</span>
+                      <span className="rounded bg-slate-900 px-1.5 py-0.5 border border-amber-400/30 text-white" style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#090D16', color: '#FFFFFF' }}>🔢 Last 4-6 chars of Ticket ID</span>
+                    </div>
                   </div>
                 </form>
 
@@ -893,6 +916,72 @@ export default function CounterPOSPage() {
                     </button>
                   </div>
                 )}
+
+                {/* QUICK RECENT BOOKINGS DIRECTORY FOR FAST GATE ENTRY */}
+                <div className="mt-6 border-t border-slate-800/80 pt-4" style={{ marginTop: '24px', paddingTop: '16px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <div className="mb-3 flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <div>
+                      <h3 className="text-xs font-extrabold uppercase tracking-wider text-amber-400" style={{ fontSize: '0.75rem', fontWeight: 800, color: '#F59E0B', margin: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        📋 Today&apos;s Active Bookings (Quick Check)
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-0.5" style={{ fontSize: '0.72rem', color: '#9CA3AF', margin: '2px 0 0 0' }}>
+                        Tap any customer ticket to verify instantly without typing
+                      </p>
+                    </div>
+                  </div>
+
+                  {loadingRecentBookings ? (
+                    <div className="py-4 text-center text-xs text-slate-400" style={{ padding: '16px', textAlign: 'center', fontSize: '0.78rem', color: '#9CA3AF' }}>
+                      <RefreshCw className="mx-auto mb-1 h-4 w-4 animate-spin text-amber-400" style={{ width: '16px', height: '16px', margin: '0 auto 4px', color: '#F59E0B' }} />
+                      Loading recent bookings list...
+                    </div>
+                  ) : recentBookings.length === 0 ? (
+                    <div className="rounded-lg bg-slate-950/40 p-3 text-center text-xs text-slate-500" style={{ padding: '12px', textAlign: 'center', fontSize: '0.78rem', color: '#6B7280', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                      No recent confirmed bookings found.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto pr-1" style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {recentBookings.slice(0, 15).map((b: any) => {
+                        const tokenShort = b.qr_code_token ? (b.qr_code_token.split('_').pop() || b.qr_code_token.slice(-6)) : b.id.slice(-6);
+                        return (
+                          <div
+                            key={b.id}
+                            className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/70 p-2.5 hover:border-amber-400/50 transition-colors"
+                            style={{ backgroundColor: '#090D16', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                          >
+                            <div className="min-w-0 flex-1 pr-2" style={{ minWidth: 0, flex: 1, paddingRight: '8px' }}>
+                              <div className="flex items-center gap-1.5" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span className="font-bold text-white text-xs truncate" style={{ fontWeight: 700, fontSize: '0.82rem', color: '#FFFFFF' }}>
+                                  {b.customer_name || 'Customer'}
+                                </span>
+                                <span className="rounded bg-slate-800 px-1.5 py-0.2 font-mono text-[10px] text-amber-400 border border-amber-400/20" style={{ padding: '1px 5px', borderRadius: '4px', fontSize: '0.65rem', fontFamily: 'monospace', color: '#F59E0B', backgroundColor: 'rgba(245,158,11,0.1)' }}>
+                                  #{tokenShort}
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap gap-2" style={{ fontSize: '0.72rem', color: '#9CA3AF', marginTop: '2px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                <span>📱 {b.customer_phone || 'No phone'}</span>
+                                <span>🎬 {b.show?.movie?.title || 'Movie'}</span>
+                                <span className="text-rose-400 font-medium">💺 {b.booking_seats?.map((bs: any) => `${bs.seat_layout?.row_label}-${bs.seat_layout?.seat_number}`).join(', ') || 'Seats'}</span>
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => {
+                                const targetToken = b.qr_code_token || b.id;
+                                setTokenInput(targetToken);
+                                verifyTokenDirectly(targetToken);
+                              }}
+                              className="rounded-lg bg-amber-400 hover:bg-amber-300 px-3 py-1.5 text-xs font-bold text-slate-950 transition-all flex-shrink-0 active:scale-95"
+                              style={{ padding: '6px 12px', fontSize: '0.75rem', fontWeight: 700, borderRadius: '6px', backgroundColor: '#F59E0B', color: '#000000', cursor: 'pointer', border: 'none', flexShrink: 0 }}
+                            >
+                              Verify
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
 
               </div>
             </div>

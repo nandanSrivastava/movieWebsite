@@ -79,14 +79,38 @@ export async function GET(req: NextRequest) {
       booking = await db.getBookingById(extractedId);
     }
 
-    // 3. If still not found, search all bookings for matching qr_code_token
+    // 3. Flexible lookup: search all bookings for matching token substring, phone number, or customer name
     if (!booking) {
       const allBookings = await db.getBookings();
-      booking = allBookings.find((b: any) => 
-        b.qr_code_token === cleanedToken || 
-        b.id === cleanedToken || 
-        (b.qr_code_token && b.qr_code_token.includes(cleanedToken))
-      ) || null;
+      
+      const searchLower = cleanedToken.toLowerCase();
+      const normalizePhone = (p: string) => (p || '').replace(/[\s\-\+]/g, '').replace(/^(91|0)/, '');
+      const searchPhoneNorm = normalizePhone(searchLower);
+
+      // Sort bookings by creation date descending so recent/today bookings match first
+      const sortedBookings = [...allBookings].sort((a: any, b: any) => {
+        const timeA = new Date(a.created_at || 0).getTime();
+        const timeB = new Date(b.created_at || 0).getTime();
+        return timeB - timeA;
+      });
+
+      booking = sortedBookings.find((b: any) => {
+        const bId = (b.id || '').toLowerCase();
+        const bQr = (b.qr_code_token || '').toLowerCase();
+        const bPhone = normalizePhone(b.customer_phone || '');
+        const bName = (b.customer_name || '').toLowerCase();
+
+        return (
+          bId === searchLower ||
+          bQr === searchLower ||
+          bQr.includes(searchLower) ||
+          bId.includes(searchLower) ||
+          bQr.endsWith(searchLower) ||
+          bId.endsWith(searchLower) ||
+          (searchPhoneNorm.length >= 4 && bPhone.includes(searchPhoneNorm)) ||
+          (searchLower.length >= 3 && bName.includes(searchLower))
+        );
+      }) || null;
     }
 
     if (!booking) {
