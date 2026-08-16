@@ -102,7 +102,7 @@ export default async function Home() {
                 <Link href="/menu" className="btn-premium btn-trailer">View Menu</Link>
               </div>
               <div className="culinary-grid">
-                <div className="culinary-item" style={{ transform: 'translateY(40px)' }}>
+                <div className="culinary-item">
                   <Image src="https://images.unsplash.com/photo-1585647347384-2593bc35786b?q=80&w=600&auto=format&fit=crop" alt="Gourmet Popcorn" fill sizes="(max-width: 768px) 100vw, 50vw" style={{ objectFit: 'cover' }} />
                   <div className="culinary-item-overlay"><span className="culinary-item-title">Gourmet Popcorn</span></div>
                 </div>

@@ -1,12 +1,15 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { useQuery } from '@tanstack/react-query';
+import { Download, Image as ImageIcon } from 'lucide-react';
+import { toPng } from 'html-to-image';
 import DigitalTicketStub from '@/features/bookings/components/DigitalTicketStub';
+import GoldTicketPassExport from '@/features/bookings/components/GoldTicketPassExport';
 
 interface BookingConfirmationClientProps {
   initialBooking: any;
@@ -17,6 +20,33 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
   const searchParams = useSearchParams();
   const { showToast } = useToast();
   
+  const ticketRef = useRef<HTMLDivElement>(null);
+  const exportPassRef = useRef<HTMLDivElement>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  const handleDownloadImage = async () => {
+    const targetEl = exportPassRef.current || ticketRef.current;
+    if (!targetEl) return;
+    setIsDownloading(true);
+    try {
+      const dataUrl = await toPng(targetEl, {
+        cacheBust: true,
+        quality: 0.95,
+        pixelRatio: 2,
+      });
+      const link = document.createElement('a');
+      link.download = `ticket-${booking?.id || 'dhrub-cineplex'}.png`;
+      link.href = dataUrl;
+      link.click();
+      showToast('Ticket saved as image!', 'success');
+    } catch (err) {
+      console.error('Failed to download ticket image', err);
+      showToast('Failed to generate ticket image.', 'error');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const [pollingAttempts, setPollingAttempts] = useState(0);
   const [hasNotified, setHasNotified] = useState(false);
   const [verificationFailed, setVerificationFailed] = useState(false);
@@ -241,7 +271,7 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
       }} />
 
       {/* SUCCESS BANNER */}
-      <div style={{ textAlign: 'center', marginBottom: '32px', zIndex: 5 }}>
+      <div className="non-printable" style={{ textAlign: 'center', marginBottom: '32px', zIndex: 5 }}>
         <div style={{
           width: '48px',
           height: '48px',
@@ -265,20 +295,56 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
         </p>
       </div>
 
-      {/* PHYSICAL TICKET STUB DESIGN */}
-      <DigitalTicketStub 
-        booking={booking} 
-        qrCodeUrl={qrCodeUrl} 
-        seatLabels={seatLabels}
-        formatTimeLabel={formatTimeLabel}
-        formatDateLabel={formatDateLabel}
-      />
+      {/* PHYSICAL TICKET STUB DESIGN (UI PAGE DISPLAY) */}
+      <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+        <DigitalTicketStub 
+          ref={ticketRef}
+          booking={booking} 
+          qrCodeUrl={qrCodeUrl} 
+          seatLabels={seatLabels}
+          formatTimeLabel={formatTimeLabel}
+          formatDateLabel={formatDateLabel}
+        />
+      </div>
 
-      <div style={{ marginTop: '32px', zIndex: 5 }}>
+      {/* OFF-SCREEN GOLD LUXURY PASS (USED FOR HIGH-RES PNG DOWNLOAD & MAILING) */}
+      <div style={{ position: 'absolute', left: '-9999px', top: 0, opacity: 0, pointerEvents: 'none' }}>
+        <GoldTicketPassExport 
+          ref={exportPassRef}
+          booking={booking} 
+          qrCodeUrl={qrCodeUrl} 
+          seatLabels={seatLabels}
+          formatTimeLabel={formatTimeLabel}
+          formatDateLabel={formatDateLabel}
+        />
+      </div>
+
+      <div style={{ marginTop: '28px', display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', zIndex: 5 }} className="non-printable">
         <button 
+          type="button"
+          onClick={handleDownloadImage}
+          disabled={isDownloading}
+          className="btn btn-gold"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: '12px 24px',
+            fontSize: '0.95rem',
+            fontWeight: 700,
+            borderRadius: '10px',
+            cursor: 'pointer'
+          }}
+        >
+          <ImageIcon className="w-4 h-4" />
+          <span>{isDownloading ? 'Generating Image...' : 'Download Ticket Image (PNG)'}</span>
+        </button>
+
+        <button 
+          type="button"
           onClick={() => router.push('/')}
           className="btn btn-secondary"
-          style={{ color: '#FFFFFF', borderColor: 'var(--border-default)' }}
+          style={{ color: '#FFFFFF', borderColor: 'var(--border-default)', padding: '12px 20px', borderRadius: '10px' }}
         >
           Return to Home Catalog
         </button>

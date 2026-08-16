@@ -30,9 +30,10 @@ export interface SendEmailParams {
   subject: string;
   html: string;
   text?: string;
+  attachments?: any[];
 }
 
-export const sendEmail = async ({ to, subject, html, text }: SendEmailParams) => {
+export const sendEmail = async ({ to, subject, html, text, attachments }: SendEmailParams) => {
   try {
     if (!isEmailConfigured()) {
       console.warn('sendEmail skipped: SMTP_* env vars are not configured.');
@@ -45,6 +46,7 @@ export const sendEmail = async ({ to, subject, html, text }: SendEmailParams) =>
       subject,
       text,
       html,
+      attachments,
     });
     console.log('Message sent: %s', info.messageId);
     return { success: true, messageId: info.messageId };
@@ -102,10 +104,22 @@ export async function sendBookingTicketEmail(bookingId: string) {
       .join(', ') || 'N/A';
 
     let qrCodeDataUrl: string | null = null;
-    if (booking.qr_code_token) {
+    const attachments: any[] = [];
+    const qrToken = booking.qr_code_token || booking.id;
+
+    if (qrToken) {
       try {
         const { generateQRCodeDataUrl } = await import('@/features/shared/utils/qr');
-        qrCodeDataUrl = await generateQRCodeDataUrl(booking.qr_code_token);
+        const base64Data = await generateQRCodeDataUrl(qrToken);
+        if (base64Data && base64Data.includes('base64,')) {
+          const buffer = Buffer.from(base64Data.split('base64,')[1], 'base64');
+          attachments.push({
+            filename: 'ticket-qr.png',
+            content: buffer,
+            cid: 'qrcode@dhrubcineplex'
+          });
+          qrCodeDataUrl = 'cid:qrcode@dhrubcineplex';
+        }
       } catch (qrErr) {
         console.error('Failed to generate QR code data URL for email:', qrErr);
       }
@@ -121,7 +135,7 @@ export async function sendBookingTicketEmail(bookingId: string) {
       seats: seatsStr,
       totalAmount: Number(booking.total_amount),
       qrCodeDataUrl,
-      qrToken: booking.qr_code_token,
+      qrToken: booking.qr_code_token || booking.id,
     };
 
     const html = ticketConfirmationEmail(ctx);
@@ -129,6 +143,7 @@ export async function sendBookingTicketEmail(bookingId: string) {
       to: customerEmail,
       subject: `Dhrub Cineplex — Ticket Confirmed (${ctx.movieTitle})`,
       html,
+      attachments,
     });
   } catch (err) {
     console.error('sendBookingTicketEmail error:', err);

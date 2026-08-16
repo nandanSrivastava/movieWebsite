@@ -91,13 +91,13 @@ export default async function BookingPage({ params }: PageProps) {
             justifyContent: 'space-between',
             alignItems: 'center',
             flexWrap: 'wrap',
-            gap: '20px',
+            gap: '16px',
             background: 'linear-gradient(135deg, rgba(18, 18, 24, 0.8) 0%, rgba(11, 11, 14, 0.95) 100%)',
             backdropFilter: 'blur(12px)',
             border: '1px solid var(--border-subtle)',
-            padding: '24px 28px',
+            padding: '16px 20px',
             borderRadius: '16px',
-            marginBottom: '40px',
+            marginBottom: '32px',
             boxShadow: 'var(--shadow-lg)'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>

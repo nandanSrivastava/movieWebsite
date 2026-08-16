@@ -51,20 +51,20 @@ export default function UpcomingCarousel({ movies }: { movies: UpcomingMovie[] }
     >
       <button 
         onClick={() => scroll('left')}
+        className="hidden sm:flex"
         style={{
           position: 'absolute',
           left: '10px',
           top: '50%',
           transform: 'translateY(-50%)',
           zIndex: 10,
-          background: 'rgba(0,0,0,0.5)',
+          background: 'rgba(0,0,0,0.6)',
           color: 'white',
           border: '1px solid rgba(255,255,255,0.2)',
           borderRadius: '50%',
           width: '40px',
           height: '40px',
           cursor: 'pointer',
-          display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: '20px',
@@ -94,20 +94,20 @@ export default function UpcomingCarousel({ movies }: { movies: UpcomingMovie[] }
 
       <button 
         onClick={() => scroll('right')}
+        className="hidden sm:flex"
         style={{
           position: 'absolute',
           right: '10px',
           top: '50%',
           transform: 'translateY(-50%)',
           zIndex: 10,
-          background: 'rgba(0,0,0,0.5)',
+          background: 'rgba(0,0,0,0.6)',
           color: 'white',
           border: '1px solid rgba(255,255,255,0.2)',
           borderRadius: '50%',
           width: '40px',
           height: '40px',
           cursor: 'pointer',
-          display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: '20px',

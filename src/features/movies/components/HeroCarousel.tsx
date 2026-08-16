@@ -88,12 +88,12 @@ export default function HeroCarousel({ movies }: { movies: any[] }) {
                 {hero.synopsis}
               </p>
 
-              <div className="premium-actions">
-                <Link href={`/movies/${hero.id}`} className="btn-premium btn-book">
+              <div className="premium-actions flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-sm sm:max-w-md mx-auto">
+                <Link href={`/movies/${hero.id}`} className="btn-premium btn-book w-full sm:w-auto text-center py-3.5 px-6 rounded-xl font-bold text-sm">
                   Get Tickets
                 </Link>
-                <Link href={`/movies/${hero.id}`} className="btn-premium btn-trailer">
-                  Watch Trailer
+                <Link href={`/movies/${hero.id}`} className="btn-premium btn-trailer w-full sm:w-auto text-center py-3.5 px-6 rounded-xl font-bold text-sm">
+                  Watch Info & Trailer
                 </Link>
               </div>
             </div>

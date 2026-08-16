@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useTheme } from 'next-themes';
-import { User, LogOut, LogIn, Ticket, Sun, Moon, Search } from 'lucide-react';
+import { User, LogOut, LogIn, Ticket, Sun, Moon, Search, Home, Menu, X } from 'lucide-react';
 
 export default function Header() {
   const pathname = usePathname();
@@ -84,13 +84,19 @@ export default function Header() {
           border: 1px solid var(--border-subtle);
           box-shadow: 0 4px 30px rgba(0,0,0,0.1);
         }
+        .hdr-mobile-btn {
+          display: none !important;
+        }
+        .hdr-actions {
+          margin-left: auto;
+        }
         @media (max-width: 850px) {
           .site-header {
             top: max(8px, env(safe-area-inset-top));
             width: calc(100% - 16px);
-            height: 60px;
-            border-radius: 14px;
-            padding: 0 12px;
+            height: 56px;
+            border-radius: 16px;
+            padding: 0 16px;
           }
           .hdr-nav {
             display: none !important;
@@ -105,6 +111,13 @@ export default function Header() {
           .hdr-logo-mark {
             width: 32px !important;
             height: 32px !important;
+          }
+          .hdr-user-btn {
+            width: 36px !important;
+            height: 36px !important;
+          }
+          .hdr-mobile-btn {
+            display: flex !important;
           }
         }
         .site-header.scrolled {
@@ -434,9 +447,15 @@ export default function Header() {
               <button 
                 className={`hdr-user-btn ${dropdownOpen ? 'active' : ''}`}
                 onClick={() => setDropdownOpen(!dropdownOpen)}
-                aria-label="User Menu"
+                aria-label="Toggle Menu"
               >
-                <User className="w-5 h-5" />
+                {dropdownOpen ? (
+                  <X className="w-5 h-5" />
+                ) : user ? (
+                  <User className="w-5 h-5" />
+                ) : (
+                  <Menu className="w-5 h-5" />
+                )}
               </button>
 
               {dropdownOpen && (
@@ -451,6 +470,14 @@ export default function Header() {
                           {user.role}
                         </span>
                       </div>
+                      <Link 
+                        href="/" 
+                        className="hdr-dropdown-item"
+                        onClick={() => setDropdownOpen(false)}
+                      >
+                        <Home className="w-4 h-4 text-gold-500" />
+                        <span>Home / Movies</span>
+                      </Link>
                       {user.role === 'admin' && (
                         <Link 
                           href="/admin/dashboard" 
@@ -482,6 +509,14 @@ export default function Header() {
                     </>
                   ) : (
                     <>
+                      <Link 
+                        href="/" 
+                        className="hdr-dropdown-item"
+                        onClick={() => setDropdownOpen(false)}
+                      >
+                        <Home className="w-4 h-4 text-gold-500" />
+                        <span>Home / Movies</span>
+                      </Link>
                       <Link 
                         href="/booking/lookup" 
                         className="hdr-dropdown-item"

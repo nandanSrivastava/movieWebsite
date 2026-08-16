@@ -187,14 +187,18 @@ export default function AdminDashboardPage() {
           />
 
           {/* SEGMENTED TAB NAVIGATION BAR */}
-          <div style={{
-            display: 'flex',
-            gap: '8px',
-            overflowX: 'auto',
-            borderBottom: '1px solid var(--border-subtle)',
-            paddingBottom: '12px',
-            marginBottom: '28px'
-          }}>
+          <div 
+            className="scrollbar-none"
+            style={{
+              display: 'flex',
+              gap: '8px',
+              overflowX: 'auto',
+              borderBottom: '1px solid var(--border-subtle)',
+              paddingBottom: '12px',
+              marginBottom: '28px',
+              WebkitOverflowScrolling: 'touch'
+            }}
+          >
             {TABS.map((tab) => {
               const isActive = activeTab === tab.id;
               return (
