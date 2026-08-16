@@ -120,11 +120,27 @@ export default function CounterPOSPage() {
         html5QrCodeRef.current.clear();
       }
 
+      // Query cameras to trigger native browser permission dialog
+      const devices = await Html5Qrcode.getCameras();
+      if (!devices || devices.length === 0) {
+        setCameraError('No camera devices detected on this device.');
+        setIsCameraActive(false);
+        return;
+      }
+
+      // Find back/rear camera or fallback to available camera
+      const selectedCam = devices.find(d => 
+        d.label.toLowerCase().includes('back') || 
+        d.label.toLowerCase().includes('rear') || 
+        d.label.toLowerCase().includes('environment')
+      ) || devices[devices.length - 1] || devices[0];
+
+      const cameraId = selectedCam.id;
       const qrScanner = new Html5Qrcode('reader-qr-view');
       html5QrCodeRef.current = qrScanner;
 
       await qrScanner.start(
-        { facingMode: 'environment' },
+        cameraId,
         {
           fps: 10,
           qrbox: { width: 220, height: 220 },
@@ -146,7 +162,7 @@ export default function CounterPOSPage() {
       let msg = 'Camera access denied or unavailable.';
       const errStr = String(err?.message || err);
       if (err?.name === 'NotAllowedError' || errStr.includes('Permission denied') || errStr.includes('NotAllowedError')) {
-        msg = 'Camera permission is blocked in your mobile browser. On Android Chrome, tap ⁝ (top right) → Settings → Site settings → Camera → Allow for dhrubcineplex.in';
+        msg = 'Camera permission prompt was dismissed or blocked. Tap Allow when prompted, or enter ticket token manually below.';
       }
       setCameraError(msg);
       setIsCameraActive(false);
