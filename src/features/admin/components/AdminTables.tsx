@@ -202,7 +202,7 @@ export default function AdminTables({
                   </thead>
                   <tbody>
                     {activeLocks.map((lock: any) => (
-                      <tr key={lock.seatId || lock.seatLayoutId} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                      <tr key={`${lock.showId}:${lock.seatLayoutId}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
                         <td style={{ padding: '12px', fontWeight: 600 }}>{lock.movieTitle}</td>
                         <td style={{ padding: '12px' }}>{lock.screenName}</td>
                         <td style={{ padding: '12px', color: 'var(--accent-crimson)', fontWeight: 'bold' }}>{lock.seatLabel}</td>

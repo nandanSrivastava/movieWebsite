@@ -18,7 +18,7 @@ interface AuthContextType {
   loading: boolean;
   isMock: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string, fullName: string, phone: string) => Promise<void>;
+  signUp: (email: string, password: string, fullName: string, phone: string) => Promise<{ needsEmailConfirmation: boolean }>;
   signOut: () => Promise<void>;
   switchMockRole: (role: 'admin' | 'member' | 'user' | 'anonymous') => void;
 }
@@ -161,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 id = foundMember.id;
               }
             }
-          } catch (e) {
+          } catch {
             // fallback to default user role
           }
         }
@@ -191,7 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCookie('cinebook_mock_session', JSON.stringify(newUser), 86400);
         setUser(newUser);
       } else if (supabase) {
-        const { error } = await supabase.auth.signUp({
+        const { data, error } = await supabase.auth.signUp({
           email,
           password,
           options: {
@@ -199,11 +199,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               full_name: fullName,
               phone: phone,
             },
+            // When "Confirm email" is on, the emailed link goes through our
+            // callback, which exchanges the PKCE ?code for a session cookie.
+            emailRedirectTo: `${window.location.origin}/auth/callback?next=/`,
           },
         });
         if (error) throw error;
         // In Supabase, the public.profiles trigger handles public.profiles insertion
+        // No session back means the account is waiting on email confirmation.
+        return { needsEmailConfirmation: !data.session };
       }
+      return { needsEmailConfirmation: false };
     } finally {
       setLoading(false);
     }

@@ -1,25 +1,48 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Header from '@/features/shared/components/Header';
-import Footer from '@/features/shared/components/Footer';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { useQuery } from '@tanstack/react-query';
-import { Download, Image as ImageIcon } from 'lucide-react';
+import { Download, CalendarPlus, Navigation, CheckCircle2, AlertCircle, Clock, RefreshCw } from 'lucide-react';
 import { toPng } from 'html-to-image';
 import DigitalTicketStub from '@/features/bookings/components/DigitalTicketStub';
 import GoldTicketPassExport from '@/features/bookings/components/GoldTicketPassExport';
+import StepIndicator from '@/features/bookings/components/StepIndicator';
+import { formatShowDate, formatShowTime, seatLabel, showStartsAt } from '@/features/shared/utils/format';
+import styles from './BookingConfirmationClient.module.css';
 
 interface BookingConfirmationClientProps {
   initialBooking: any;
+  accessKey: string | null;
 }
 
-export default function BookingConfirmationClient({ initialBooking }: BookingConfirmationClientProps) {
-  const router = useRouter();
+// Same coordinates as the map on the home page
+const CINEMA_LOCATION = '27.1401051,84.0555802';
+const CINEMA_ADDRESS = 'Dhrub Cineplex, Sukhban, Bagaha, Bihar 845105';
+
+function calendarLink(booking: any, seats: string) {
+  const show = booking?.show;
+  if (!show) return null;
+  const start = showStartsAt(show.show_date, show.show_time);
+  if (Number.isNaN(start.getTime())) return null;
+  const end = new Date(start.getTime() + (Number(show.movie?.duration_minutes) || 180) * 60_000);
+  const stamp = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: `${show.movie?.title ?? 'Movie'} at Dhrub Cineplex`,
+    dates: `${stamp(start)}/${stamp(end)}`,
+    location: CINEMA_ADDRESS,
+    details: `Seats: ${seats}\nBooking: ${String(booking.id).toUpperCase()}\nShow the QR code on your ticket at the entrance.`,
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+export default function BookingConfirmationClient({ initialBooking, accessKey }: BookingConfirmationClientProps) {
   const searchParams = useSearchParams();
   const { showToast } = useToast();
-  
+
   const ticketRef = useRef<HTMLDivElement>(null);
   const exportPassRef = useRef<HTMLDivElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -38,10 +61,10 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
       link.download = `ticket-${booking?.id || 'dhrub-cineplex'}.png`;
       link.href = dataUrl;
       link.click();
-      showToast('Ticket saved as image!', 'success');
+      showToast('Ticket saved as an image.', 'success');
     } catch (err) {
       console.error('Failed to download ticket image', err);
-      showToast('Failed to generate ticket image.', 'error');
+      showToast('Couldn’t save the ticket image. Take a screenshot of the ticket instead.', 'error');
     } finally {
       setIsDownloading(false);
     }
@@ -50,13 +73,15 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
   const [pollingAttempts, setPollingAttempts] = useState(0);
   const [hasNotified, setHasNotified] = useState(false);
   const [verificationFailed, setVerificationFailed] = useState(false);
+  const [checkingBank, setCheckingBank] = useState(false);
 
   // ── 1. WEBHOOK COMPLETION POLLING WITH REACT QUERY ───────────
   const { data: booking, refetch } = useQuery({
     queryKey: ['bookingStatus', initialBooking.id],
     queryFn: async () => {
       setPollingAttempts(p => p + 1);
-      const res = await fetch(`/api/bookings/status?bookingId=${initialBooking.id}`);
+      const keyParam = accessKey ? `&k=${encodeURIComponent(accessKey)}` : '';
+      const res = await fetch(`/api/bookings/status?bookingId=${initialBooking.id}${keyParam}`);
       if (!res.ok) throw new Error('Status check failed');
       return await res.json();
     },
@@ -64,7 +89,7 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
       // In React Query v5, query is passed to refetchInterval.
       const paymentId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('paymentId') : null;
       const maxAttempts = paymentId ? 3 : 20;
-      
+
       if (query.state?.data?.payment_status !== 'pending' || pollingAttempts >= maxAttempts) return false;
       return 1500;
     },
@@ -73,23 +98,19 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
 
   const status = booking?.payment_status || 'pending';
 
+  // The page itself says what happened; no extra pop-ups for the outcome
   useEffect(() => {
     if (status !== 'pending' && !hasNotified) {
       setHasNotified(true);
-      if (status === 'paid') {
-        showToast('Ticket confirmed successfully!', 'success');
-      } else if (status === 'failed' || status === 'refunded') {
-        showToast('Booking hold expired before payment finalized. Refund initiated.', 'error');
-      }
     }
-    
+
     const paymentId = searchParams.get('paymentId');
     const maxAttempts = paymentId ? 3 : 20;
 
     if (pollingAttempts >= maxAttempts && status === 'pending' && !hasNotified) {
       setHasNotified(true);
       if (paymentId) {
-        showToast('Verifying payment with the bank...', 'info');
+        setCheckingBank(true);
         fetch('/api/bookings/verify-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -98,19 +119,16 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
           if (data.status === 'confirmed' || data.status === 'refunded') {
              refetch();
           } else {
-             showToast('Payment verification failed. Please contact support.', 'error');
              setVerificationFailed(true);
           }
         }).catch(() => {
-          showToast('Payment verification failed. Please contact support.', 'error');
           setVerificationFailed(true);
-        });
+        }).finally(() => setCheckingBank(false));
       } else {
-        showToast('Payment confirmation is taking longer than expected. Please check your email or refresh.', 'info');
         setVerificationFailed(true);
       }
     }
-  }, [status, pollingAttempts, hasNotified, showToast, searchParams, initialBooking.id, refetch]);
+  }, [status, pollingAttempts, hasNotified, searchParams, initialBooking.id, refetch]);
 
   // ── 2. QR CODE GENERATOR WITH REACT QUERY ────────────────────
   const { data: qrCodeData } = useQuery({
@@ -125,231 +143,137 @@ export default function BookingConfirmationClient({ initialBooking }: BookingCon
 
   const qrCodeUrl = qrCodeData?.qrCode || null;
 
-  // Helpers
-  const formatTimeLabel = (timeStr: string) => {
-    try {
-      const [hours, minutes] = timeStr.split(':');
-      const h = parseInt(hours);
-      const ampm = h >= 12 ? 'PM' : 'AM';
-      const displayH = h % 12 || 12;
-      return `${displayH.toString().padStart(2, '0')}:${minutes} ${ampm}`;
-    } catch {
-      return timeStr;
-    }
-  };
+  // On-screen ticket uses the shared formats; the PNG pass keeps its own uppercase styling
+  const formatTimeLabel = (timeStr: string) => formatShowTime(timeStr);
+  const formatDateLabel = (dateStr: string) => formatShowDate(dateStr, { withYear: true });
 
-  const formatDateLabel = (dateStr: string) => {
-    try {
-      const date = new Date(dateStr);
-      const options: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' };
-      return date.toLocaleDateString('en-US', options);
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const seatLabels = booking?.booking_seats?.map((bs: any) => `${bs.seat_layout?.row_label}-${bs.seat_layout?.seat_number}`).join(', ') || '';
+  const seatLabels = booking?.booking_seats?.map((bs: any) => seatLabel(bs.seat_layout?.row_label, bs.seat_layout?.seat_number)).join(', ') || '';
+  const movieHref = booking?.show?.movie_id ? `/movies/${booking.show.movie_id}` : '/movies';
 
   // ── 3. RENDER STATES ─────────────────────────────────────────
 
-  // State: Pending Validation
   if (status === 'pending') {
     if (verificationFailed) {
       return (
-        <div style={{
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', color: '#FFFFFF', textAlign: 'center', padding: '24px'
-        }}>
-          <div style={{ width: '60px', height: '60px', borderRadius: '50%', backgroundColor: 'rgba(229, 9, 20, 0.1)', color: '#E50914', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px', fontWeight: 'bold', marginBottom: '24px' }}>
-            !
-          </div>
-          <h3 style={{ fontSize: '1.6rem', fontWeight: 800, fontFamily: 'var(--font-family-heading)' }}>Verification Failed</h3>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', maxWidth: '480px', lineHeight: 1.6, marginTop: '8px', marginBottom: '32px' }}>
-            We could not automatically verify your transaction status with the bank. If money was deducted, it will be refunded or the ticket will be issued manually. Please contact support.
+        <div className={styles.state}>
+          <span className={`${styles.stateIcon} ${styles.urgent}`} aria-hidden><Clock /></span>
+          <h1 className={styles.stateTitle}>Still confirming your payment</h1>
+          <p className={styles.stateBody}>
+            The bank hasn&apos;t confirmed this payment yet. If money was deducted, we&apos;ll confirm your ticket
+            (and email it to you) or refund you automatically within a few minutes. You can safely close this page.
           </p>
-          <button onClick={() => window.location.reload()} className="btn btn-primary" style={{ padding: '12px 28px' }}>
-            Try Again
-          </button>
+          <div className={styles.stateActions}>
+            <button onClick={() => window.location.reload()} className="btn btn-primary">
+              <RefreshCw aria-hidden />Check again
+            </button>
+            <Link href="/booking/lookup" className="btn btn-ghost">Find my ticket later</Link>
+          </div>
         </div>
       );
     }
 
     return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '60vh',
-        color: '#FFFFFF',
-        fontFamily: 'var(--font-family-body)'
-      }}>
-        <div style={{
-          width: '50px',
-          height: '50px',
-          borderRadius: '50%',
-          border: '3px solid var(--border-subtle)',
-          borderTopColor: 'var(--crimson)',
-          animation: 'spin 1s linear infinite',
-          marginBottom: '20px'
-        }} />
-        <h3 style={{ fontSize: '1.25rem', fontWeight: 600 }}>Verifying Transaction...</h3>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '8px' }}>
-          We are confirming your seat allocations with the bank. Do not close this window.
-        </p>
-
-        <style jsx>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
+      <div className={styles.state} role="status" aria-live="polite">
+        <span className={`spinner ${styles.bigSpinner}`} aria-hidden />
+        <h1 className={styles.stateTitle}>{checkingBank ? 'Checking with your bank…' : 'Confirming your payment…'}</h1>
+        <p className={styles.stateBody}>This usually takes a few seconds. Please keep this page open.</p>
       </div>
     );
   }
 
-  // State: Hold Expired / Failed Checkout
-  if (status === 'failed' || status === 'refunded') {
+  // Seats lost before payment completed, or checkout abandoned
+  if (status === 'failed' || status === 'refunded' || status === 'refund_pending') {
+    const refunding = status !== 'failed';
     return (
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '60vh',
-        textAlign: 'center',
-        padding: '24px',
-        color: '#FFFFFF'
-      }}>
-        <div style={{
-          width: '60px',
-          height: '60px',
-          borderRadius: '50%',
-          backgroundColor: 'rgba(229, 9, 20, 0.1)',
-          color: '#E50914',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '28px',
-          fontWeight: 'bold',
-          marginBottom: '24px'
-        }}>
-          ✕
-        </div>
-        <h3 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#FFFFFF', fontFamily: 'var(--font-family-heading)' }}>
-          Seat Reservation Expired
-        </h3>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', maxWidth: '480px', lineHeight: 1.6, marginTop: '8px', marginBottom: '32px' }}>
-          The 6-minute seat hold expired before the checkout completed. The seats were released for other bookings.
-          Any money deducted has been automatically refunded.
+      <div className={styles.state} role="alert">
+        <span className={`${styles.stateIcon} ${styles.danger}`} aria-hidden><AlertCircle /></span>
+        <h1 className={styles.stateTitle}>
+          {refunding ? 'Seats no longer available' : 'Booking not completed'}
+        </h1>
+        <p className={styles.stateBody}>
+          {refunding
+            ? (status === 'refunded'
+                ? 'The seat hold ran out and the seats went to another customer before your payment arrived. Your full payment has been refunded; banks usually show it within 5–7 working days.'
+                : 'The seat hold ran out and the seats went to another customer before your payment arrived. A full refund is being processed automatically.')
+            : 'The seat hold expired before payment, so no ticket was issued and nothing was charged for this booking.'}
         </p>
-        <button 
-          onClick={() => router.replace(`/booking/${booking?.show_id}`)}
-          className="btn btn-primary"
-          style={{ padding: '12px 28px' }}
-        >
-          Select Different Seats
-        </button>
+        <div className={styles.stateActions}>
+          <Link href={`/booking/${booking?.show_id}`} replace className="btn btn-primary">Choose seats again</Link>
+          <Link href={movieHref} className="btn btn-ghost">Other showtimes</Link>
+        </div>
       </div>
     );
   }
 
-  // State: Payment Success & Ticket Render
+  // Paid: the ticket
+  const calendarHref = calendarLink(booking, seatLabels);
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%', padding: '20px 0' }}>
-      
-      {/* Visual Ambient Glow */}
-      <div style={{
-        position: 'absolute',
-        top: '10%',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: '450px',
-        height: '450px',
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(16, 185, 129, 0.08) 0%, transparent 70%)',
-        filter: 'blur(50px)',
-        pointerEvents: 'none'
-      }} />
+    <div className={styles.paid}>
+      <div className={`non-printable ${styles.steps}`}>
+        <StepIndicator current="Ticket" />
+      </div>
 
-      {/* SUCCESS BANNER */}
-      <div className="non-printable" style={{ textAlign: 'center', marginBottom: '32px', zIndex: 5 }}>
-        <div style={{
-          width: '48px',
-          height: '48px',
-          borderRadius: '50%',
-          backgroundColor: 'rgba(16, 185, 129, 0.15)',
-          color: '#10B981',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '22px',
-          fontWeight: 'bold',
-          marginBottom: '16px'
-        }}>
-          ✓
+      <div className={`non-printable ${styles.banner}`}>
+        <span className={styles.bannerIcon} aria-hidden><CheckCircle2 /></span>
+        <div>
+          <h1 className={styles.bannerTitle}>You&apos;re booked</h1>
+          <p className={styles.bannerBody}>
+            Show the QR code at the entrance.
+            {booking?.customer_email && <> A copy is on its way to <strong>{booking.customer_email}</strong>.</>}
+          </p>
         </div>
-        <h2 style={{ fontSize: '1.8rem', fontWeight: 800, color: '#FFFFFF', fontFamily: 'var(--font-family-heading)' }}>
-          Booking Confirmed!
-        </h2>
-        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '6px' }}>
-          Your digital ticket stub has been generated. Enjoy your movie!
-        </p>
       </div>
 
-      {/* PHYSICAL TICKET STUB DESIGN (UI PAGE DISPLAY) */}
-      <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
-        <DigitalTicketStub 
-          ref={ticketRef}
-          booking={booking} 
-          qrCodeUrl={qrCodeUrl} 
-          seatLabels={seatLabels}
-          formatTimeLabel={formatTimeLabel}
-          formatDateLabel={formatDateLabel}
-        />
-      </div>
+      <DigitalTicketStub
+        ref={ticketRef}
+        booking={booking}
+        qrCodeUrl={qrCodeUrl}
+        seatLabels={seatLabels}
+        formatTimeLabel={formatTimeLabel}
+        formatDateLabel={formatDateLabel}
+      />
 
       {/* OFF-SCREEN GOLD LUXURY PASS (USED FOR HIGH-RES PNG DOWNLOAD & MAILING) */}
-      <div style={{ position: 'absolute', left: '-9999px', top: 0, opacity: 0, pointerEvents: 'none' }}>
-        <GoldTicketPassExport 
+      <div aria-hidden style={{ position: 'absolute', left: '-9999px', top: 0, opacity: 0, pointerEvents: 'none' }}>
+        <GoldTicketPassExport
           ref={exportPassRef}
-          booking={booking} 
-          qrCodeUrl={qrCodeUrl} 
+          booking={booking}
+          qrCodeUrl={qrCodeUrl}
           seatLabels={seatLabels}
-          formatTimeLabel={formatTimeLabel}
-          formatDateLabel={formatDateLabel}
+          formatTimeLabel={(t) => formatShowTime(t)}
+          formatDateLabel={(d) => formatShowDate(d)}
         />
       </div>
 
-      <div style={{ marginTop: '28px', display: 'flex', gap: '12px', flexWrap: 'wrap', justifyContent: 'center', zIndex: 5 }} className="non-printable">
-        <button 
+      <div className={`non-printable ${styles.actions}`}>
+        <button
           type="button"
           onClick={handleDownloadImage}
-          disabled={isDownloading}
-          className="btn btn-gold"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '12px 24px',
-            fontSize: '0.95rem',
-            fontWeight: 700,
-            borderRadius: '10px',
-            cursor: 'pointer'
-          }}
+          disabled={isDownloading || !qrCodeUrl}
+          aria-busy={isDownloading || undefined}
+          className="btn btn-primary btn-lg"
         >
-          <ImageIcon className="w-4 h-4" />
-          <span>{isDownloading ? 'Generating Image...' : 'Download Ticket Image (PNG)'}</span>
+          {isDownloading ? <span className="spinner" aria-hidden /> : <Download aria-hidden />}
+          {isDownloading ? 'Saving…' : 'Save ticket image'}
         </button>
-
-        <button 
-          type="button"
-          onClick={() => router.push('/')}
-          className="btn btn-secondary"
-          style={{ color: '#FFFFFF', borderColor: 'var(--border-default)', padding: '12px 20px', borderRadius: '10px' }}
-        >
-          Return to Home Catalog
-        </button>
+        <div className={styles.secondary}>
+          {calendarHref && (
+            <a href={calendarHref} target="_blank" rel="noreferrer" className="btn btn-ghost">
+              <CalendarPlus aria-hidden />Add to calendar
+            </a>
+          )}
+          <a href={`https://www.google.com/maps/dir/?api=1&destination=${CINEMA_LOCATION}`} target="_blank" rel="noreferrer" className="btn btn-ghost">
+            <Navigation aria-hidden />Directions
+          </a>
+        </div>
       </div>
 
+      <p className={`non-printable ${styles.help}`}>
+        Lost this page? Use <Link href="/booking/lookup">Find my ticket</Link> with your phone number, or show the number at the counter.
+      </p>
+
+      <Link href="/movies" className={`non-printable btn btn-quiet ${styles.more}`}>Browse more movies</Link>
     </div>
   );
 }

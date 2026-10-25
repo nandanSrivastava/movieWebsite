@@ -1,45 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { createClient } from '@supabase/supabase-js';
+import { getRequestUser } from '@/lib/requestAuth';
+import { z } from 'zod';
+
+// Staff accounts can sell tickets and see bookings: require a real password
+const memberSchema = z.object({
+  full_name: z.string({ error: 'Full Name, Email, and Password are required.' }).trim().min(1, 'Full Name, Email, and Password are required.').max(100),
+  email: z.string({ error: 'Full Name, Email, and Password are required.' }).trim().email('Enter a valid email address.').max(255),
+  phone: z.string().trim().max(20).regex(/^[+\d\s()-]*$/, 'Enter a valid phone number.').optional(),
+  password: z.string({ error: 'Full Name, Email, and Password are required.' }).min(10, 'Staff passwords must be at least 10 characters long.').max(72),
+});
+import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
+
+// Member management needs the Auth admin API, which only the service role key
+// can call. No silent fallback to the anon key: that just hides a missing
+// env var behind confusing permission errors.
+function getServiceRoleClient(): SupabaseClient | null {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!serviceRoleKey) return null;
+  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
+}
+
+function misconfiguredResponse() {
+  console.error('[admin/members] SUPABASE_SERVICE_ROLE_KEY is not set — member management is unavailable.');
+  return NextResponse.json(
+    { error: 'Member management is not configured on the server. Please contact support.' },
+    { status: 500 }
+  );
+}
+
+// auth.admin.listUsers() is paginated (50 per page by default), so a single
+// call silently misses everyone past the first page. Walk the pages until
+// `visit` returns true, capped so a huge user table can't turn one admin
+// request into an unbounded number of Auth API calls.
+const LIST_USERS_PER_PAGE = 1000;
+const LIST_USERS_MAX_PAGES = 20;
+
+async function scanAuthUsers(admin: SupabaseClient, visit: (user: User) => boolean): Promise<void> {
+  let page: number | null = 1;
+  for (let i = 0; page && i < LIST_USERS_MAX_PAGES; i++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: LIST_USERS_PER_PAGE });
+    if (error) throw error;
+    for (const user of data.users) {
+      if (visit(user)) return;
+    }
+    page = data.users.length > 0 ? data.nextPage : null;
+  }
+  if (page) {
+    console.warn(`[admin/members] Stopped scanning auth users after ${LIST_USERS_MAX_PAGES * LIST_USERS_PER_PAGE} users.`);
+  }
+}
+
+async function findAuthUserByEmail(admin: SupabaseClient, email: string): Promise<User | null> {
+  let found: User | null = null;
+  await scanAuthUsers(admin, (user) => {
+    if (user.email?.toLowerCase() === email) found = user;
+    return found !== null;
+  });
+  return found;
+}
 
 async function getAdminUser(req: NextRequest): Promise<{ isAdmin: boolean; userId: string | null }> {
   try {
-    let userRole = 'user';
-    let userId: string | null = null;
-    const isSupabaseConfigured = 
-      !!process.env.NEXT_PUBLIC_SUPABASE_URL && 
-      (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-
-    if (!isSupabaseConfigured) {
-      const mockSession = req.cookies.get('cinebook_mock_session');
-      if (mockSession) {
-        const sessionObj = JSON.parse(mockSession.value);
-        userRole = sessionObj.role;
-        userId = sessionObj.id;
-      }
-    } else {
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-      const authHeader = req.headers.get('Authorization') || '';
-      const token = authHeader.replace('Bearer ', '');
-      
-      let userRes;
-      if (token) {
-        userRes = await supabase.auth.getUser(token);
-      } else {
-        userRes = await supabase.auth.getUser();
-      }
-
-      if (userRes.data.user) {
-        userId = userRes.data.user.id;
-        const profile = await db.getProfile(userRes.data.user.id);
-        userRole = profile?.role || 'user';
-      }
-    }
-
-    return { isAdmin: userRole === 'admin', userId };
+    const user = await getRequestUser(req);
+    return { isAdmin: user?.role === 'admin', userId: user?.id ?? null };
   } catch {
     return { isAdmin: false, userId: null };
   }
@@ -57,10 +83,8 @@ export async function GET(req: NextRequest) {
       (!!process.env.SUPABASE_SERVICE_ROLE_KEY || !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
     if (isSupabaseConfigured) {
-      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-      const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceRoleKey, {
-        auth: { autoRefreshToken: false, persistSession: false }
-      });
+      const supabaseAdmin = getServiceRoleClient();
+      if (!supabaseAdmin) return misconfiguredResponse();
 
       const { data: memberProfiles, error: profileErr } = await supabaseAdmin
         .from('profiles')
@@ -70,16 +94,18 @@ export async function GET(req: NextRequest) {
 
       if (profileErr) throw profileErr;
 
+      // Only hit the Auth API for profiles that don't carry their own email.
+      const missingEmail = new Set((memberProfiles || []).filter(p => !p.email).map(p => p.id as string));
       const usersMap = new Map<string, string>();
-      try {
-        const { data: authData } = await supabaseAdmin.auth.admin.listUsers();
-        if (authData?.users) {
-          authData.users.forEach(u => {
-            if (u.email) usersMap.set(u.id, u.email);
+      if (missingEmail.size > 0) {
+        try {
+          await scanAuthUsers(supabaseAdmin, (u) => {
+            if (u.email && missingEmail.has(u.id)) usersMap.set(u.id, u.email);
+            return usersMap.size === missingEmail.size;
           });
+        } catch (e) {
+          console.warn('Could not list auth users for email enrichment:', e);
         }
-      } catch (e) {
-        console.warn('Could not list auth users for email enrichment:', e);
       }
 
       const members = (memberProfiles || []).map(p => ({
@@ -94,7 +120,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ members });
   } catch (err: any) {
     console.error('Fetch members error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to fetch members' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to fetch members. Please try again.' }, { status: 500 });
   }
 }
 
@@ -105,16 +131,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized: Only admins can onboard new members.' }, { status: 403 });
     }
 
-    const body = await req.json();
-    const { full_name, email, phone, password } = body;
-
-    if (!email || !full_name || !password) {
-      return NextResponse.json({ error: 'Full Name, Email, and Password are required.' }, { status: 400 });
+    const parsed = memberSchema.safeParse(await req.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid member details.' }, { status: 400 });
     }
-
-    if (password.length < 6) {
-      return NextResponse.json({ error: 'Password must be at least 6 characters long.' }, { status: 400 });
-    }
+    const { full_name, email, phone, password } = parsed.data;
 
     const isSupabaseConfigured = 
       !!process.env.NEXT_PUBLIC_SUPABASE_URL && 
@@ -130,10 +151,8 @@ export async function POST(req: NextRequest) {
       newMember = await db.onboardMember(cleanEmail, cleanName, cleanPhone);
     } else {
       // Supabase mode onboarding
-      const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-      const supabaseAdmin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceRoleKey, {
-        auth: { autoRefreshToken: false, persistSession: false }
-      });
+      const supabaseAdmin = getServiceRoleClient();
+      if (!supabaseAdmin) return misconfiguredResponse();
 
       let createdUserId: string | null = null;
 
@@ -146,16 +165,26 @@ export async function POST(req: NextRequest) {
       });
 
       if (authErr) {
-        if (authErr.message.includes('already registered')) {
-          const { data: usersData } = await supabaseAdmin.auth.admin.listUsers();
-          const existingUser = usersData?.users?.find(u => u.email?.toLowerCase() === cleanEmail);
+        // GoTrue says "A user with this email address has already been registered"
+        // (code email_exists) — match the code, with the wording as a fallback.
+        const alreadyExists =
+          authErr.code === 'email_exists' ||
+          authErr.code === 'user_already_exists' ||
+          /already (been )?registered/i.test(authErr.message);
+
+        if (alreadyExists) {
+          // Promote the existing account to member (its password is unchanged).
+          const existingUser = await findAuthUserByEmail(supabaseAdmin, cleanEmail);
           if (existingUser) {
             createdUserId = existingUser.id;
           } else {
             return NextResponse.json({ error: 'User is already registered.' }, { status: 400 });
           }
-        } else {
+        } else if (authErr.status && authErr.status < 500) {
+          // Validation problems (weak password, bad email…) are safe to show.
           return NextResponse.json({ error: authErr.message }, { status: 400 });
+        } else {
+          throw authErr;
         }
       } else {
         createdUserId = authUser?.user?.id || null;
@@ -218,6 +247,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, member: newMember });
   } catch (err: any) {
     console.error('Member onboarding error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to onboard member' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to onboard member. Please try again.' }, { status: 500 });
   }
 }

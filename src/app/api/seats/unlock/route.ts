@@ -1,88 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db';
-import { createClient } from '@supabase/supabase-js';
+import { getClientIp, getHoldOwner } from '@/lib/requestAuth';
 
 const unlockRequestSchema = z.object({
-  showId: z.string().min(1),
-  seatLayoutIds: z.array(z.string().min(1)).min(1),
-  anonSessionId: z.string().uuid().optional(),
+  showId: z.string().min(1).max(100),
+  seatLayoutIds: z.array(z.string().min(1).max(100)).min(1).max(200),
+  // Staff only: release holds that belong to someone else (never touches sold seats)
+  force: z.boolean().optional(),
 });
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Get body payload and validate
-    const body = await req.json();
-    const result = unlockRequestSchema.safeParse(body);
+    const result = unlockRequestSchema.safeParse(await req.json().catch(() => null));
     if (!result.success) {
-      return NextResponse.json({ error: 'Invalid inputs', details: result.error.format() }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid inputs' }, { status: 400 });
     }
-    const { showId, seatLayoutIds, anonSessionId } = result.data;
+    const { showId, seatLayoutIds, force } = result.data;
 
-    // 2. Identify User Session (authenticated or anonymous)
-    let userId: string | null = null;
-    const isSupabaseConfigured = 
-      !!process.env.NEXT_PUBLIC_SUPABASE_URL && 
-      (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+    const { owner, user } = await getHoldOwner(req, false);
 
-    if (!isSupabaseConfigured) {
-      // Mock mode auth resolution
-      const mockSession = req.cookies.get('cinebook_mock_session');
-      if (mockSession) {
-        try {
-          const sessionObj = JSON.parse(mockSession.value);
-          userId = sessionObj.id;
-        } catch {}
+    if (force) {
+      if (!user || user.role !== 'admin') {
+        return NextResponse.json({ error: 'Forbidden: Admin access required.' }, { status: 403 });
       }
-    } else {
-      // Live mode auth resolution
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-      const authHeader = req.headers.get('Authorization') || '';
-      const token = authHeader.replace('Bearer ', '');
-      
-      let userRes;
-      if (token) {
-        userRes = await supabase.auth.getUser(token);
-      } else {
-        userRes = await supabase.auth.getUser();
-      }
-
-      if (userRes.data.user) {
-        userId = userRes.data.user.id;
-      }
+      await db.forceReleaseSeatHolds(showId, seatLayoutIds);
+      await db.logAudit(user.id, 'SEAT_FORCE_RELEASE', { showId, seatLayoutIds }, getClientIp(req) || undefined);
+      return NextResponse.json({ success: true });
     }
 
-    // Fall back to anonymous session ID if no authenticated user
-    if (!userId && anonSessionId) {
-      userId = anonSessionId;
+    if (!owner) {
+      return NextResponse.json({ error: 'No seat hold to release.' }, { status: 401 });
     }
 
-    if (!userId) {
-      return NextResponse.json({ error: 'No session to unlock seats.' }, { status: 401 });
-    }
-
-    // Check if requester is admin
-    let isAdmin = false;
-    if (userId) {
-      const profile = await db.getProfile(userId);
-      if (profile?.role === 'admin') isAdmin = true;
-    }
-
-    // 3. Unlock Seats
-    await db.unlockSeats(showId, seatLayoutIds, userId, isAdmin);
-
-    // 4. Log Audit Event
-    const ip = req.headers.get('x-forwarded-for') || 'unknown';
-    const isAnon = !!anonSessionId && userId === anonSessionId;
-    await db.logAudit(isAnon ? null : userId, 'SEAT_UNLOCK', { showId, seatLayoutIds, anonymous: isAnon }, ip);
-
+    // Only the caller's own holds are released
+    await db.releaseSeatHolds(showId, seatLayoutIds, owner);
     return NextResponse.json({ success: true });
-  } catch (err: any) {
+  } catch (err) {
     console.error('Seat unlock API error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Could not release seats right now.' }, { status: 500 });
   }
 }
-

@@ -1,0 +1,44 @@
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.inlineLink {
+  color: var(--accent-ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
+.barTitle {
+  font-weight: 700;
+  font-size: var(--fs-md);
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.barMeta {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cap { font-weight: 500; color: var(--urgent); }
+
+.totalLabel {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.totalAmount {
+  display: block;
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}

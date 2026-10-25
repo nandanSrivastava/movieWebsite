@@ -1,4 +1,6 @@
 import React, { forwardRef } from 'react';
+import { formatINR } from '@/features/shared/utils/format';
+import styles from './DigitalTicketStub.module.css';
 
 interface DigitalTicketStubProps {
   booking: any;
@@ -8,178 +10,75 @@ interface DigitalTicketStubProps {
   formatDateLabel: (dateStr: string) => string;
 }
 
+// The on-screen ticket: printed paper against the dark hall, with a tear-off
+// stub that carries the QR code staff scan at the entrance.
 const DigitalTicketStub = forwardRef<HTMLDivElement, DigitalTicketStubProps>(({
   booking, qrCodeUrl, seatLabels, formatTimeLabel, formatDateLabel
 }, ref) => {
+  const movie = booking?.show?.movie;
+  const seatCount = booking?.booking_seats?.length || seatLabels.split(',').filter(Boolean).length;
+  const checkedIn = booking?.checked_in_at
+    ? new Date(booking.checked_in_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Asia/Kolkata' })
+    : null;
+
   return (
-    <>
-      <style dangerouslySetInnerHTML={{ __html: `
-        @media print {
-          body * {
-            visibility: hidden !important;
-          }
-          header, footer, nav, .non-printable {
-            display: none !important;
-          }
-          .printable-ticket, .printable-ticket * {
-            visibility: visible !important;
-          }
-          .printable-ticket {
-            position: absolute !important;
-            left: 50% !important;
-            top: 20px !important;
-            transform: translateX(-50%) !important;
-            width: 100% !important;
-            max-width: 450px !important;
-            box-shadow: none !important;
-            border: 2px solid #000 !important;
-            color: #000 !important;
-            background: #fff !important;
-          }
-        }
-      ` }} />
-      <div 
-        ref={ref}
-        className="printable-ticket"
-        style={{
-          maxWidth: '420px',
-          width: '100%',
-          backgroundColor: '#0F172A',
-          color: '#FFFFFF',
-          borderRadius: '16px',
-          border: '1px solid var(--border-gold)',
-          boxShadow: 'var(--shadow-xl)',
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-          fontFamily: 'var(--font-family-body)',
-          zIndex: 10
-        }}
-      >
-        {/* Ticket Header (Movie Info) */}
-        <div style={{
-          backgroundColor: 'var(--bg-secondary)',
-          color: '#FFFFFF',
-          padding: '24px',
-          textAlign: 'center',
-          borderBottom: '2px dashed var(--border-gold)',
-          position: 'relative'
-        }}>
-          {/* Half circles mock ticket punch (left & right) */}
-          <div style={{ position: 'absolute', bottom: '-10px', left: '-10px', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: 'var(--bg-primary)' }} />
-          <div style={{ position: 'absolute', bottom: '-10px', right: '-10px', width: '20px', height: '20px', borderRadius: '50%', backgroundColor: 'var(--bg-primary)' }} />
+    <article ref={ref} className={`printable-ticket ${styles.ticket}`} aria-label={`Ticket for ${movie?.title ?? 'your show'}`}>
+      <header className={styles.brand}>
+        <img src="/logo.jpeg" alt="" className={styles.logo} />
+        <span className={styles.brandName}>Dhrub Cineplex</span>
+        <span className={styles.brandPlace}>Bagaha</span>
+      </header>
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '8px' }}>
-            <img src="/logo.jpeg" alt="Dhrub Cineplex Logo" style={{ height: '32px', borderRadius: '4px', marginBottom: '6px' }} />
-            <span style={{ fontSize: '0.9rem', color: 'var(--highlight-gold)', fontWeight: 800, letterSpacing: '1px', textTransform: 'uppercase' }}>
-              Dhrub Cineplex
-            </span>
-            <span style={{ fontSize: '0.6rem', color: '#9CA3AF', letterSpacing: '2px', textTransform: 'uppercase', marginTop: '2px' }}>
-              Experience the Epic Tale
-            </span>
+      <div className={styles.main}>
+        <h2 className={styles.title}>{movie?.title}</h2>
+        <p className={styles.meta}>
+          {[movie?.certification, movie?.language, movie?.duration_minutes ? `${movie.duration_minutes} min` : null]
+            .filter(Boolean).map(part => <span key={String(part)}>{part}</span>)}
+        </p>
+
+        <dl className={styles.facts}>
+          <div>
+            <dt>Date</dt>
+            <dd>{booking?.show ? formatDateLabel(booking.show.show_date) : ''}</dd>
           </div>
-
-          <h3 style={{ fontSize: '1.5rem', fontWeight: 800, marginTop: '8px', fontFamily: 'var(--font-family-heading)', lineHeight: 1.2, color: '#FFFFFF' }}>
-            {booking?.show?.movie?.title}
-          </h3>
-          <p style={{ fontSize: '0.85rem', color: '#9CA3AF', marginTop: '4px' }}>
-            {booking?.show?.movie?.genre} • {booking?.show?.movie?.duration_minutes} Mins
-          </p>
-        </div>
-
-        {/* Ticket Body (Show Coordinates) */}
-        <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <div>
-              <span style={{ fontSize: '0.75rem', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Date</span>
-              <p style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: '2px', color: '#FFFFFF' }}>
-                {booking?.show ? formatDateLabel(booking.show.show_date) : ''}
-              </p>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <span style={{ fontSize: '0.75rem', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Show Time</span>
-              <p style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: '2px', color: '#FFFFFF' }}>
-                {booking?.show ? formatTimeLabel(booking.show.show_time) : ''}
-              </p>
-            </div>
+          <div>
+            <dt>Time</dt>
+            <dd>{booking?.show ? formatTimeLabel(booking.show.show_time) : ''}</dd>
           </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            <div>
-              <span style={{ fontSize: '0.75rem', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Screen</span>
-              <p style={{ fontSize: '0.95rem', fontWeight: 700, marginTop: '2px', color: '#FFFFFF' }}>
-                Dhrub Talkies
-              </p>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <span style={{ fontSize: '0.75rem', color: '#9CA3AF', textTransform: 'uppercase', fontWeight: 600 }}>Seats Selection</span>
-              <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--highlight-gold)', marginTop: '2px' }}>
-                {seatLabels}
-              </p>
-            </div>
+          <div className={styles.wide}>
+            <dt>{seatCount === 1 ? 'Seat' : `Seats (${seatCount})`}</dt>
+            <dd className={styles.seats}>{seatLabels}</dd>
           </div>
-
-          <div style={{ height: '1px', backgroundColor: 'rgba(255, 255, 255, 0.08)', width: '100%', margin: '10px 0' }} />
-
-          {/* QR Code Container */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
-            {qrCodeUrl ? (
-              <img 
-                src={qrCodeUrl} 
-                alt="Ticket QR Code" 
-                style={{
-                  width: '180px',
-                  height: '180px',
-                  border: '1px solid var(--border-gold)',
-                  padding: '8px',
-                  borderRadius: '8px',
-                  backgroundColor: '#FFFFFF',
-                  boxShadow: '0 4px 6px rgba(0, 0, 0, 0.05)'
-                }}
-              />
-            ) : (
-              <div style={{ width: '180px', height: '180px', backgroundColor: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '8px' }}>
-                <span style={{ fontSize: '0.8rem', color: '#9CA3AF' }}>Generating QR...</span>
-              </div>
-            )}
-            <span style={{ fontSize: '0.7rem', color: '#9CA3AF', fontWeight: 500, letterSpacing: '0.5px' }}>
-              Verification ID: {booking?.id}
-            </span>
+          <div>
+            <dt>Hall</dt>
+            <dd>Dhrub Talkies</dd>
           </div>
-
-          <div style={{ height: '1px', backgroundColor: 'rgba(255, 255, 255, 0.08)', width: '100%', margin: '10px 0' }} />
-
-          {/* Customer Metadata details */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '0.8rem', color: '#9CA3AF' }}>
-            <p>👤 <strong style={{ color: '#FFFFFF' }}>Holder:</strong> {booking?.customer_name || 'Customer'}</p>
-            <p>📞 <strong style={{ color: '#FFFFFF' }}>Phone:</strong> {booking?.customer_phone || ''}</p>
-            <p>🧾 <strong style={{ color: '#FFFFFF' }}>Ref ID:</strong> {booking?.razorpay_payment_id || 'Mock Payment'}</p>
-            <p>💳 <strong style={{ color: '#FFFFFF' }}>Amount Paid:</strong> <span style={{ color: 'var(--highlight-gold)', fontWeight: 'bold' }}>₹{booking?.total_amount}</span></p>
-          </div>
-
-          <div style={{
-            marginTop: '12px',
-            paddingTop: '16px',
-            borderTop: '1px dashed rgba(212, 175, 55, 0.3)',
-            textAlign: 'center',
-            fontSize: '0.75rem',
-            color: '#9CA3AF',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px'
-          }}>
-            <span style={{ color: 'var(--highlight-gold)', fontWeight: 700 }}>
-              ★ Thank You For Choosing Dhrub Cineplex Bagaha ★
-            </span>
-            <span style={{ fontSize: '0.7rem' }}>
-              📸 @dhrubcineplex | Follow us on Instagram for more details
-            </span>
-          </div>
-
-        </div>
+        </dl>
       </div>
-    </>
+
+      <div className={styles.perforation} aria-hidden />
+
+      <div className={styles.stub}>
+        <div className={styles.qrWrap}>
+          {qrCodeUrl ? (
+            <img src={qrCodeUrl} alt="Entry QR code" className={styles.qr} />
+          ) : (
+            <div className={`${styles.qr} ${styles.qrPending}`} role="status">Preparing QR…</div>
+          )}
+          {checkedIn && <span className={styles.used}>Used at the gate · {checkedIn}</span>}
+        </div>
+        <p className={styles.admit}>Admit {seatCount}</p>
+        <p className={styles.instruction}>Show this QR code at the entrance</p>
+        <p className={styles.bookingId}>Booking <span>{String(booking?.id ?? '').toUpperCase()}</span></p>
+
+        <dl className={styles.receipt}>
+          <div><dt>Name</dt><dd>{booking?.customer_name || 'Customer'}</dd></div>
+          {booking?.customer_phone && <div><dt>Phone</dt><dd>{booking.customer_phone}</dd></div>}
+          <div><dt>Paid</dt><dd>{formatINR(booking?.total_amount)}</dd></div>
+          {booking?.razorpay_payment_id && <div><dt>Payment ref.</dt><dd className={styles.ref}>{booking.razorpay_payment_id}</dd></div>}
+        </dl>
+      </div>
+    </article>
   );
 });
 

@@ -29,7 +29,8 @@ const getAuthHeaders = async (customHeaders: Record<string, string> = {}) => {
 const fetchDashboardData = async () => {
   const authHdrs = await getAuthHeaders();
 
-  const [locksRes, logsRes, showsRes, moviesRes, screensRes, membersRes] = await Promise.all([
+  const [statsRes, locksRes, logsRes, showsRes, moviesRes, screensRes, membersRes] = await Promise.all([
+    fetch('/api/admin/stats', { headers: authHdrs }),
     fetch('/api/admin/active-locks', { headers: authHdrs }),
     fetch('/api/admin/audit-logs', { headers: authHdrs }),
     fetch('/api/shows'),
@@ -38,7 +39,8 @@ const fetchDashboardData = async () => {
     fetch('/api/admin/members', { headers: authHdrs })
   ]);
 
-  const [locksData, logsData, showsData, moviesData, screensData, membersData] = await Promise.all([
+  const [statsData, locksData, logsData, showsData, moviesData, screensData, membersData] = await Promise.all([
+    statsRes.ok ? statsRes.json().catch(() => ({})) : ({} as { stats?: any }),
     locksRes.json().catch(() => ({})),
     logsRes.json().catch(() => ({})),
     showsRes.json().catch(() => ({})),
@@ -48,6 +50,7 @@ const fetchDashboardData = async () => {
   ]);
 
   return {
+    stats: statsData.stats || null,
     activeLocks: locksData.activeLocks || [],
     auditLogs: logsData.logs || [],
     shows: showsData.shows || [],
@@ -73,8 +76,9 @@ export default function AdminDashboardPage() {
     queryKey: ['adminDashboard'],
     queryFn: fetchDashboardData,
     enabled: !!user && user.role === 'admin',
-    refetchInterval: 6000,
-    staleTime: 5000,
+    // Revenue and holds don't need second-by-second updates
+    refetchInterval: 30_000,
+    staleTime: 15_000,
   });
 
   const activeLocks = data?.activeLocks || [];
@@ -114,7 +118,8 @@ export default function AdminDashboardPage() {
         headers: await getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           showId,
-          seatLayoutIds: [seatLayoutId]
+          seatLayoutIds: [seatLayoutId],
+          force: true
         })
       });
 
@@ -133,15 +138,9 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // Calculations
-  const totalPaidRevenue = auditLogs
-    .filter((log: any) => log.action === 'PAYMENT_CAPTURE_SUCCESS' || log.action === 'BOOKING_CONFIRM_CASH_POS')
-    .reduce((acc: number, log: any) => {
-      const amt = log.details?.amount || log.details?.totalAmount || 0;
-      return acc + Number(amt);
-    }, 0);
-
-  const totalTicketsSold = shows.reduce((acc: number, show: any) => acc + (show.bookedSeats || 0), 0);
+  // Totals are counted from bookings in the database (all time)
+  const totalPaidRevenue = data?.stats?.paidRevenue ?? 0;
+  const totalTicketsSold = data?.stats?.ticketsSold ?? 0;
 
   if (!initialized || loading || authLoading || !user || user.role !== 'admin') {
     return (

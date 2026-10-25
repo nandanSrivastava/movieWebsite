@@ -1,99 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { db } from '@/lib/db';
-import Razorpay from 'razorpay';
-import crypto from 'crypto';
-import { rateLimiter } from '@/lib/rateLimit';
-import { sendBookingTicketEmail } from '@/lib/mailer';
+import { rateLimit } from '@/lib/rateLimit';
+import { getClientIp } from '@/lib/requestAuth';
+import { getRazorpay, isRazorpayConfigured, settlePayment } from '@/lib/payments';
 
+const verifySchema = z.object({
+  bookingId: z.string().min(1).max(100),
+  paymentId: z.string().regex(/^pay_[A-Za-z0-9]+$/),
+});
+
+/**
+ * Browser fallback after Razorpay checkout: if the webhook hasn't landed yet,
+ * ask Razorpay directly. Unauthenticated by design, but it can only confirm a
+ * payment Razorpay says was captured for this booking's own order.
+ */
 export async function POST(req: NextRequest) {
   try {
-    // Unauthenticated by design (fallback after a successful Razorpay payment),
-    // so rate-limit it to prevent it being used as a free API/refund hammer.
-    const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';
-    if (rateLimiter.isRateLimited(ip, 10, 60000)) {
-      return NextResponse.json({ error: 'Too many verification attempts. Please wait a minute.' }, { status: 429 });
-    }
+    const limited = await rateLimit(`verify:${getClientIp(req) || 'unknown'}`, 20, 60, 'Too many verification attempts. Please wait a minute.');
+    if (limited) return limited;
 
-    const { bookingId, paymentId } = await req.json();
-
-    if (!bookingId || !paymentId) {
+    const result = verifySchema.safeParse(await req.json().catch(() => null));
+    if (!result.success) {
       return NextResponse.json({ error: 'Missing bookingId or paymentId' }, { status: 400 });
     }
+    const { bookingId, paymentId } = result.data;
 
     const booking = await db.getBookingById(bookingId);
     if (!booking) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    if (booking.payment_status === 'paid') {
-      // Ensure ticket email was sent if not already done
-      sendBookingTicketEmail(booking.id).catch(err => console.error('Error sending ticket email:', err));
-      return NextResponse.json({ status: 'confirmed' });
+    if (booking.payment_status === 'paid') return NextResponse.json({ status: 'confirmed' });
+    if (booking.payment_status === 'refund_pending' || booking.payment_status === 'refunded') {
+      return NextResponse.json({ status: 'refunded' });
     }
 
-    // Do not re-trigger a refund for a booking already handled by the webhook
-    if (booking.payment_status === 'refunded') {
-      return NextResponse.json({ status: 'refunded', error: 'Booking was already refunded' });
+    if (!isRazorpayConfigured()) {
+      return NextResponse.json({ error: 'Online payments are not configured' }, { status: 503 });
     }
 
-    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-      return NextResponse.json({ error: 'Razorpay not configured' }, { status: 500 });
+    const rz = getRazorpay();
+    let payment: any = await rz.payments.fetch(paymentId);
+    if (payment.order_id !== booking.razorpay_order_id) {
+      return NextResponse.json({ status: 'pending', error: 'Payment does not belong to this booking' });
     }
 
-    const razorpay = new Razorpay({
-      key_id: process.env.RAZORPAY_KEY_ID,
-      key_secret: process.env.RAZORPAY_KEY_SECRET,
-    });
-
-    const payment = await razorpay.payments.fetch(paymentId);
-
-    if ((payment.status === 'captured' || payment.status === 'authorized') && payment.order_id === booking.razorpay_order_id) {
-      // If the payment is authorized but not captured (e.g. auto-capture is off), capture it here
-      if (payment.status === 'authorized') {
-        try {
-          await razorpay.payments.capture(paymentId, payment.amount, payment.currency);
-        } catch (captureErr) {
-          console.error('Failed to capture authorized payment during fallback:', captureErr);
-          // If capture fails, we probably shouldn't finalize the booking, but we can return pending
-          return NextResponse.json({ status: 'pending', error: 'Failed to capture payment' });
-        }
-      }
-
-      const seatLayoutIds = booking.booking_seats?.map(bs => bs.seat_layout_id) || [];
-      const success = await db.confirmBooking(booking.id, booking.show_id, seatLayoutIds, booking.booked_by);
-
-      if (success) {
-        const qrToken = `tkt_${booking.id}_${crypto.randomBytes(8).toString('hex')}`;
-        // finalizeBooking is idempotent: if the webhook already finalized this
-        // booking, this call returns the existing paid booking untouched.
-        await db.finalizeBooking(booking.id, paymentId, qrToken);
-        await db.logAudit(booking.booked_by, 'PAYMENT_VERIFY_FALLBACK_SUCCESS', {
-          bookingId: booking.id,
-          orderId: payment.order_id,
-          paymentId,
-          amount: booking.total_amount
-        });
-
-        // Trigger confirmation email
-        sendBookingTicketEmail(booking.id).catch(emailErr => {
-          console.error('Failed to send confirmation email on payment verify:', emailErr);
-        });
-
-        return NextResponse.json({ status: 'confirmed' });
-      } else {
-        // Refund logic if seats were swept
-        await razorpay.payments.refund(paymentId, {
-          amount: Math.round(Number(booking.total_amount) * 100),
-          notes: { reason: 'Seat lock hold expired before fallback verify' }
-        });
-        await db.updateBookingStatus(booking.id, 'refunded');
-        return NextResponse.json({ status: 'refunded', error: 'Seat hold expired' });
-      }
-    } else {
-      return NextResponse.json({ status: 'pending', error: 'Payment not captured or authorized' });
+    if (payment.status === 'authorized') {
+      // Auto-capture off or lagging: capture what the customer approved
+      payment = await rz.payments.capture(paymentId, payment.amount, payment.currency);
+    }
+    if (payment.status !== 'captured') {
+      return NextResponse.json({ status: 'pending' });
     }
 
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message || 'Internal error' }, { status: 500 });
+    const outcome = await settlePayment(booking, payment, 'verify');
+    if (outcome === 'confirmed' || outcome === 'already_paid') return NextResponse.json({ status: 'confirmed' });
+    if (outcome === 'refund_queued') return NextResponse.json({ status: 'refunded' });
+    return NextResponse.json({ status: 'pending' });
+  } catch (err) {
+    console.error('Verify payment API error:', err);
+    return NextResponse.json({ error: 'Could not verify the payment right now' }, { status: 500 });
   }
 }

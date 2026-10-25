@@ -1,0 +1,39 @@
+.bar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 900;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding-bottom: env(safe-area-inset-bottom);
+  background: var(--bg-glass);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: var(--bottom-nav-height);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+  transition: color var(--t-fast);
+}
+.tab[aria-current='page'] { color: var(--accent-ink); }
+.tab:active { color: var(--text-primary); }
+
+.icon { width: 22px; height: 22px; }
+
+/* Keep page content (and the footer) clear of the bar */
+:global(body):has(.bar) {
+  padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 860px) {
+  .bar { display: none; }
+  :global(body):has(.bar) { padding-bottom: 0; }
+}

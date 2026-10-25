@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { IndianRupee, Check, X } from 'lucide-react';
+import { formatINR } from '@/features/shared/utils/format';
 
 interface MockGatewayModalProps {
   totalAmount: number;
@@ -8,94 +10,59 @@ interface MockGatewayModalProps {
   handleSimulatePaymentFailure: () => void;
 }
 
+// Development-only stand-in for the Razorpay window
 export default function MockGatewayModal({
   totalAmount, mockBookingPayload, customerName,
   handleSimulatePaymentSuccess, handleSimulatePaymentFailure
 }: MockGatewayModalProps) {
+  const firstButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => { firstButton.current?.focus(); }, []);
+
   return (
     <div style={{
-      position: 'fixed',
-      top: 0, left: 0, width: '100%', height: '100%',
-      backgroundColor: 'rgba(0, 0, 0, 0.85)',
-      zIndex: 99999,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backdropFilter: 'blur(12px)',
-      padding: '20px'
+      position: 'fixed', inset: 0, zIndex: 99999,
+      backgroundColor: 'rgba(13, 6, 9, 0.85)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '16px'
     }}>
-      <div style={{
-        maxWidth: '460px',
-        width: '100%',
-        padding: '36px',
-        backgroundColor: 'var(--bg-card)',
-        borderRadius: '16px',
-        border: '1px solid var(--border-gold)',
-        textAlign: 'center',
-        boxShadow: 'var(--shadow-xl), 0 0 30px var(--gold-glow)'
-      }}>
-        <div style={{
-          width: '60px',
-          height: '60px',
-          borderRadius: '50%',
-          backgroundColor: 'rgba(197, 168, 128, 0.1)',
-          color: 'var(--highlight-gold)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '28px',
-          margin: '0 auto 20px auto',
-          fontWeight: 'bold'
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mock-gateway-title"
+        style={{
+          maxWidth: '420px', width: '100%', padding: '28px',
+          backgroundColor: 'var(--bg-elevated)', borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-gold)', textAlign: 'center', boxShadow: 'var(--shadow-xl)'
+        }}
+      >
+        <span style={{
+          width: 52, height: 52, borderRadius: '50%', margin: '0 auto 16px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'var(--accent-bg)', color: 'var(--accent-ink)'
         }}>
-          ₹
-        </div>
+          <IndianRupee aria-hidden width={24} height={24} />
+        </span>
 
-        <h3 style={{ fontSize: '1.45rem', fontWeight: 800, marginBottom: '8px', color: '#FFFFFF', fontFamily: 'var(--font-family-heading)' }}>
-          Simulated Razorpay Gateway
-        </h3>
-        <p style={{ color: '#9CA3AF', fontSize: '0.9rem', marginBottom: '24px', lineHeight: 1.5 }}>
-          You are running in development Mock Mode. You can test success/failure payment scenarios instantly.
+        <h2 id="mock-gateway-title" style={{ fontSize: 'var(--fs-xl)', marginBottom: 6 }}>Test payment</h2>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-sm)', marginBottom: 20 }}>
+          Mock mode (development). No real payment happens. Pick an outcome to test.
         </p>
 
-        <div style={{
-          padding: '16px',
-          backgroundColor: 'rgba(255, 255, 255, 0.02)',
-          borderRadius: '8px',
-          border: '1px solid rgba(255, 255, 255, 0.05)',
-          textAlign: 'left',
-          fontSize: '0.85rem',
-          color: '#E5E7EB',
-          marginBottom: '32px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px'
+        <dl style={{
+          padding: '14px 16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)',
+          textAlign: 'left', fontSize: 'var(--fs-sm)', marginBottom: 20, display: 'grid', gap: 6
         }}>
-          <p>💵 <strong>Amount:</strong> ₹{totalAmount}</p>
-          <p>📦 <strong>Order ID:</strong> {mockBookingPayload?.razorpayOrderId}</p>
-          <p>👤 <strong>Customer:</strong> {customerName}</p>
-        </div>
+          <div><dt style={{ display: 'inline', color: 'var(--text-muted)' }}>Amount: </dt><dd style={{ display: 'inline', fontWeight: 700 }}>{formatINR(totalAmount)}</dd></div>
+          <div><dt style={{ display: 'inline', color: 'var(--text-muted)' }}>Order: </dt><dd style={{ display: 'inline', wordBreak: 'break-all' }}>{mockBookingPayload?.razorpayOrderId}</dd></div>
+          <div><dt style={{ display: 'inline', color: 'var(--text-muted)' }}>Customer: </dt><dd style={{ display: 'inline' }}>{customerName}</dd></div>
+        </dl>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <button 
-            onClick={handleSimulatePaymentSuccess}
-            className="btn btn-gold"
-            style={{ width: '100%', padding: '12px', fontSize: '0.95rem' }}
-          >
-            ✓ Simulate Payment Success
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button ref={firstButton} onClick={handleSimulatePaymentSuccess} className="btn btn-primary btn-block">
+            <Check aria-hidden />Simulate Payment Success
           </button>
-          <button 
-            onClick={handleSimulatePaymentFailure}
-            className="btn btn-secondary"
-            style={{ 
-              width: '100%', 
-              padding: '12px', 
-              fontSize: '0.95rem',
-              borderColor: 'rgba(150, 40, 40, 0.3)', 
-              color: '#FF4D55',
-              backgroundColor: 'rgba(150, 40, 40, 0.05)'
-            }}
-          >
-            ✕ Simulate Payment Failure
+          <button onClick={handleSimulatePaymentFailure} className="btn btn-ghost btn-block" style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}>
+            <X aria-hidden />Simulate Payment Failure
           </button>
         </div>
       </div>

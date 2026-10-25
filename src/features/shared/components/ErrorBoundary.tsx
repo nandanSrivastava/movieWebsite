@@ -1,6 +1,7 @@
 'use client';
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { reportError } from '@/lib/reportError';
 
 interface Props {
   children?: ReactNode;
@@ -24,7 +25,10 @@ class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('Uncaught error inside Dhrub Cineplex:', error, errorInfo);
-    // In production, errors are captured here and logged to a monitoring service.
+    // Report to Sentry with the React component stack (no-op without a DSN).
+    reportError(error, {
+      contexts: { react: { componentStack: errorInfo.componentStack ?? '' } },
+    });
   }
 
   private handleReload = () => {
@@ -38,78 +42,28 @@ class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div style={{
+        <main role="alert" style={{
           display: 'flex',
-          flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
           minHeight: '100vh',
-          backgroundColor: '#0F0F12',
-          color: '#FFFFFF',
           padding: '24px',
           textAlign: 'center',
-          fontFamily: "'Outfit', sans-serif"
         }}>
-          <div style={{
-            maxWidth: '500px',
-            backgroundColor: '#1A1A22',
-            padding: '40px',
-            borderRadius: '16px',
-            border: '1px solid #25252E',
-            boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
-          }}>
-            <div style={{
-              width: '64px',
-              height: '64px',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(229, 9, 20, 0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              margin: '0 auto 24px auto',
-              color: '#E50914',
-              fontSize: '32px',
-              fontWeight: 'bold'
-            }}>
-              !
-            </div>
-            <h2 style={{
-              fontSize: '1.8rem',
-              color: '#FFFFFF',
-              marginBottom: '16px',
-              fontWeight: 700
-            }}>
-              Something Went Wrong
-            </h2>
-            <p style={{
-              color: '#A0A0B0',
-              marginBottom: '32px',
-              fontSize: '1rem',
-              lineHeight: '1.6'
-            }}>
+          <div style={{ maxWidth: '460px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+            <span aria-hidden style={{
+              width: 56, height: 56, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: 'var(--danger-bg)', color: 'var(--danger)', fontSize: 28, fontWeight: 700,
+            }}>!</span>
+            <h1 style={{ fontSize: 'var(--fs-2xl)' }}>Something went wrong</h1>
+            <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>
               Dhrub Cineplex encountered a temporary issue loading this section. Your booking progress is saved on our servers.
             </p>
-            <button 
-              onClick={this.handleReload}
-              style={{
-                padding: '12px 32px',
-                backgroundColor: '#E50914',
-                color: '#FFFFFF',
-                border: 'none',
-                borderRadius: '8px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                fontSize: '1rem',
-                transition: 'background-color 0.2s ease'
-              }}
-              onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#F81F2B'}
-              onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#E50914'}
-            >
-              Reload Page
+            <button onClick={this.handleReload} className="btn btn-primary" style={{ marginTop: 8 }}>
+              Reload page
             </button>
           </div>
-        </div>
+        </main>
       );
     }
 

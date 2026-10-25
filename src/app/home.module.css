@@ -1,0 +1,118 @@
+.section {
+  padding-top: 40px;
+  padding-bottom: 8px;
+}
+
+.heading {
+  font-size: var(--fs-2xl);
+  margin-bottom: 16px;
+}
+
+.emptyNote { color: var(--text-secondary); }
+
+.bandTitle {
+  font-size: var(--fs-3xl);
+  color: var(--text-primary);
+}
+
+/* A change of surface marks the hall section, rather than another row of cards */
+.hallBand {
+  margin-top: 56px;
+  padding: 48px 0;
+  background: var(--bg-primary);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.features {
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr;
+  margin-top: 24px;
+  border-top: 1px solid var(--border-subtle);
+}
+.feature {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  column-gap: 14px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.featureIcon { grid-row: span 2; width: 26px; height: 26px; color: var(--accent-ink); margin-top: 2px; }
+.featureTitle { font-size: var(--fs-lg); }
+.featureDesc { margin-top: 4px; font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.6; max-width: 52ch; }
+
+.food {
+  display: grid;
+  gap: 24px;
+  padding-top: 56px;
+}
+.foodText p {
+  margin: 12px 0 20px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  max-width: 56ch;
+}
+.foodGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.foodItem {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+.foodItem figcaption {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 32px 12px 12px;
+  background: linear-gradient(to top, rgba(13, 6, 9, 0.9), transparent);
+  color: var(--ticket);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+
+.visit {
+  display: grid;
+  gap: 24px;
+  padding-top: 56px;
+}
+.visitList { display: grid; gap: 18px; margin: 16px 0 20px; }
+.visitList dt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.visitList dt svg { width: 18px; height: 18px; color: var(--accent-ink); }
+.visitList dd {
+  margin-top: 4px;
+  margin-left: 26px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.visitList a { color: var(--text-primary); text-decoration: underline; text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+
+.map {
+  min-height: 300px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+}
+.map iframe { width: 100%; height: 100%; min-height: 300px; border: 0; display: block; }
+:global(.dark) .map iframe {
+  filter: invert(90%) hue-rotate(180deg) brightness(85%) contrast(110%);
+}
+
+@media (min-width: 900px) {
+  .section { padding-top: 56px; }
+  .heading { font-size: var(--fs-3xl); margin-bottom: 20px; }
+  .bandTitle { font-size: var(--fs-4xl); }
+  .hallBand { padding: 72px 0; margin-top: 72px; }
+  .features { grid-template-columns: 1fr 1fr; column-gap: 48px; border-top: none; }
+  .feature { border-top: 1px solid var(--border-subtle); border-bottom: none; padding: 24px 0; }
+  .food { grid-template-columns: 1fr 1fr; align-items: center; gap: 56px; padding-top: 72px; }
+  .visit { grid-template-columns: 360px 1fr; gap: 48px; padding-top: 72px; }
+  .map, .map iframe { min-height: 420px; }
+}

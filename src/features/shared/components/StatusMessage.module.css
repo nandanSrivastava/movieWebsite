@@ -1,0 +1,49 @@
+.wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  padding-top: 48px;
+  padding-bottom: 48px;
+}
+
+.inner {
+  max-width: 460px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  margin-bottom: 4px;
+}
+.icon svg { width: 28px; height: 28px; }
+.success { background: var(--success-bg); color: var(--success); }
+.danger { background: var(--danger-bg); color: var(--danger); }
+.urgent { background: rgba(255, 138, 61, 0.12); color: var(--urgent); }
+.info { background: var(--accent-bg); color: var(--accent-ink); }
+
+.title {
+  font-size: var(--fs-2xl);
+}
+
+.body {
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+}

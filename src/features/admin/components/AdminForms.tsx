@@ -1,5 +1,6 @@
 'use client';
 
+import { getDatesInRange } from '@/features/admin/utils/dateRange';
 import React, { useState, useEffect } from 'react';
 import { useAdminStore } from '@/features/admin/store/adminStore';
 import { useToast } from '@/features/shared/context/ToastContext';
@@ -37,18 +38,6 @@ const formatTime12h = (timeStr: string) => {
   }
 };
 
-const getDatesInRange = (startStr: string, endStr: string): string[] => {
-  if (!startStr) return [];
-  if (!endStr || endStr < startStr) return [startStr];
-  const list: string[] = [];
-  let curr = new Date(startStr + 'T00:00:00');
-  const end = new Date(endStr + 'T00:00:00');
-  while (curr <= end) {
-    list.push(curr.toISOString().split('T')[0]);
-    curr.setDate(curr.getDate() + 1);
-  }
-  return list;
-};
 
 export default function AdminForms({ 
   moviesList, 

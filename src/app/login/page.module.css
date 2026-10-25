@@ -1,0 +1,78 @@
+.page {
+  display: flex;
+  justify-content: center;
+  padding-top: 32px;
+  padding-bottom: 48px;
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+}
+
+.title { font-size: var(--fs-3xl); }
+.sub { margin-top: 4px; margin-bottom: 20px; color: var(--text-secondary); }
+
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 4px;
+  margin-bottom: 20px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+}
+.tabs button {
+  min-height: 40px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  transition: background-color var(--t-fast), color var(--t-fast);
+}
+.tabs button[aria-pressed='true'] { background: var(--bg-elevated); color: var(--text-primary); box-shadow: var(--shadow-sm); }
+
+.labelRow { display: flex; justify-content: space-between; align-items: baseline; }
+.textButton {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--accent-ink);
+  min-height: 32px;
+}
+.textButton:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+.passwordWrap { position: relative; }
+.passwordWrap input { padding-right: 52px; }
+.reveal {
+  position: absolute;
+  right: 2px;
+  top: 2px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+.reveal:hover { color: var(--text-primary); }
+.reveal svg { width: 20px; height: 20px; }
+
+.guest {
+  margin-top: 20px;
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.guest a { color: var(--accent-ink); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+.devTip {
+  margin-top: 28px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-default);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.devTip strong { color: var(--text-secondary); }
+.devTip code { color: var(--accent-ink); font-family: var(--font-mono); font-size: 0.85em; }

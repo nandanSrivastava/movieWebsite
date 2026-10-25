@@ -1,0 +1,76 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+}
+
+.poster {
+  position: relative;
+  display: block;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 4px;
+}
+.poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--dur-slow) var(--ease-out);
+}
+
+/* Always visible on touch; on hover devices it brightens */
+.book {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  box-shadow: var(--shadow-md);
+}
+
+@media (hover: hover) {
+  .book { opacity: 0; transform: translateY(4px); transition: opacity var(--t-fast), transform var(--t-fast); }
+  .card:hover .book,
+  .card:focus-visible .book { opacity: 1; transform: none; }
+  .card:hover .poster img { transform: scale(1.03); }
+}
+
+.title {
+  font-weight: 700;
+  font-size: var(--fs-md);
+  line-height: 1.25;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.metaText { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.metaText + .metaText { flex-shrink: 0; }
+.cert {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 16px;
+  color: var(--text-secondary);
+}

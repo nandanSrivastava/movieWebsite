@@ -8,30 +8,31 @@ export default function PrivacyPolicyPage() {
       <style dangerouslySetInnerHTML={{
         __html: `
         .legal-page-header {
-          padding: 160px 0 80px;
+          padding: 48px 0 24px;
           text-align: center;
           background: linear-gradient(to bottom, var(--bg-void), var(--bg-primary));
         }
         .legal-page-title {
           font-family: var(--font-display);
           font-size: clamp(2.5rem, 6vw, 4.5rem);
-          color: #fff;
+          color: var(--text-primary);
           margin-bottom: 16px;
         }
         .legal-content {
-          padding: 0 0 120px;
+          padding: 0 0 48px;
           background: var(--bg-primary);
         }
         .legal-container {
           max-width: 800px;
           margin: 0 auto;
           padding: 0 20px;
-          color: rgba(255,255,255,0.7);
+          color: var(--text-secondary);
           font-family: var(--font-body);
           line-height: 1.8;
         }
         .legal-container h2 {
-          color: var(--gold-500);
+          color: var(--text-primary);
+          font-size: var(--fs-xl);
           font-family: var(--font-heading);
           margin-top: 40px;
           margin-bottom: 20px;

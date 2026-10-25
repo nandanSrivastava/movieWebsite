@@ -1,18 +1,47 @@
 -- ============================================================
--- DHRUB CINEPLEX — SUPABASE SCHEMA
+-- DHRUB CINEPLEX — SUPABASE SCHEMA (FRESH INSTALL ONLY)
 -- Run this in: Supabase Dashboard → SQL Editor → New Query
 -- ⚠️  FULL RESET: drops all existing tables, policies, and
---     functions before recreating. Safe to re-run anytime.
+--     functions before recreating. NEVER run it on a database
+--     that holds real bookings — it refuses to if any exist.
+--
+-- After this file, run every file in supabase/migrations/ in
+-- order (001, 002, ...). Existing databases only run the
+-- migrations they haven't had yet. See supabase/README.md.
 -- ============================================================
+
+-- ── SAFETY GUARD ─────────────────────────────────────────────
+-- Abort before dropping anything if this database already has bookings.
+DO $$
+DECLARE
+  v_has_bookings BOOLEAN := FALSE;
+BEGIN
+  -- Dynamic SQL: on a fresh database the table doesn't exist yet
+  IF to_regclass('public.bookings') IS NOT NULL THEN
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM public.bookings LIMIT 1)' INTO v_has_bookings;
+  END IF;
+  IF v_has_bookings THEN
+    RAISE EXCEPTION 'schema.sql would delete existing bookings. Run only the files in supabase/migrations/ on this database.';
+  END IF;
+END $$;
 
 -- ── TEARDOWN (drop everything in dependency order) ───────────
 DROP TRIGGER  IF EXISTS on_auth_user_created ON auth.users;
 DROP FUNCTION IF EXISTS public.handle_new_user()    CASCADE;
 DROP FUNCTION IF EXISTS public.lock_seats(UUID, UUID[], UUID, INTEGER) CASCADE;
+DROP FUNCTION IF EXISTS public.lock_seats(UUID, UUID[], UUID, INTEGER, INTEGER) CASCADE;
+DROP FUNCTION IF EXISTS public.lock_seats(UUID, UUID[], UUID, TEXT) CASCADE;
+DROP FUNCTION IF EXISTS public.extend_seat_holds(UUID, UUID[], UUID, INTEGER) CASCADE;
+DROP FUNCTION IF EXISTS public.finalize_payment(UUID, TEXT, TEXT, TEXT) CASCADE;
+DROP FUNCTION IF EXISTS public.rate_limit_hit(TEXT, INTEGER, INTEGER) CASCADE;
+DROP FUNCTION IF EXISTS public.show_occupancy(UUID[]) CASCADE;
+DROP FUNCTION IF EXISTS public.admin_sales_summary() CASCADE;
 DROP FUNCTION IF EXISTS public.confirm_booking(UUID, UUID, UUID[], UUID) CASCADE;
 DROP FUNCTION IF EXISTS public.sweep_expired_locks() CASCADE;
 DROP FUNCTION IF EXISTS public.is_staff()  CASCADE;
 DROP FUNCTION IF EXISTS public.is_admin()  CASCADE;
+
+DROP TABLE IF EXISTS public.rate_limits CASCADE;
 
 DROP TABLE IF EXISTS public.processed_webhook_events CASCADE;
 DROP TABLE IF EXISTS public.audit_logs    CASCADE;
@@ -99,7 +128,7 @@ CREATE TABLE IF NOT EXISTS public.seat_layout (
   screen_id   UUID NOT NULL REFERENCES public.screens(id) ON DELETE CASCADE,
   row_label   TEXT NOT NULL,
   seat_number INTEGER NOT NULL,
-  category    TEXT NOT NULL DEFAULT 'economy' CHECK (category IN ('economy', 'premium')),
+  category    TEXT NOT NULL DEFAULT 'classic' CHECK (category IN ('classic', 'premium')),
   UNIQUE (screen_id, row_label, seat_number)
 );
 
@@ -112,9 +141,10 @@ CREATE TABLE IF NOT EXISTS public.shows (
   screen_id       UUID NOT NULL REFERENCES public.screens(id) ON DELETE CASCADE,
   show_date       DATE NOT NULL,
   show_time       TIME NOT NULL,
-  price_economy   NUMERIC(10,2) NOT NULL DEFAULT 150,  -- Economy (Stalls)
-  price_premium   NUMERIC(10,2) NOT NULL DEFAULT 200,  -- Premium (Gold centre)
-  -- Legacy columns kept for backward-compat (mirrors price_economy)
+  price_classic   NUMERIC(10,2) NOT NULL DEFAULT 150,  -- Classic (rows A–G)
+  price_premium   NUMERIC(10,2) NOT NULL DEFAULT 200,  -- Premium (row P)
+  -- Legacy columns kept for backward-compat (mirror price_classic)
+  price_economy   NUMERIC(10,2) NOT NULL DEFAULT 150,
   price_normal    NUMERIC(10,2) NOT NULL DEFAULT 150,
   price_recliner  NUMERIC(10,2) NOT NULL DEFAULT 150,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -548,35 +578,14 @@ INSERT INTO public.screens (id, name, total_rows, seats_per_row) VALUES
   ('a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'Dhrub Talkies', 9, 18)
 ON CONFLICT (id) DO NOTHING;
 
--- Seat layouts — Dhrub Talkies actual hall (matches sketch, front → back)
--- Rows G,F,E,D,C: 18 seats — Left[1-5] Economy | Centre[6-13] Premium | Right[14-18] Economy
--- Row A: 13 seats — Centre[6-13] Premium | Right[14-18] Economy (no left)
--- Row B: 10 seats — Left[1-5] Economy | Right[14-18] Economy (no centre)
--- Row S (Silver): 10 seats — Left[1-5] | Right[14-18] → Economy ₹150
--- Row P (Gold): 11 seats — Left[1-6] | Right[7-11]   → Premium ₹200
+-- Seat layouts — Dhrub Talkies hall (front → back)
+-- Rows G,F,E,D,C,B,A: 18 seats each → Classic ₹150
+-- Row P: 11 seats → Premium ₹200
 INSERT INTO public.seat_layout (screen_id, row_label, seat_number, category)
--- Rows G-C: full 3-section
-SELECT s.screen_id, r.row_label, n.num,
-  CASE WHEN n.num BETWEEN 6 AND 13 THEN 'premium' ELSE 'economy' END
-FROM
-  (VALUES ('a9f1a0e7-3f36-41b2-bb5b-43a0e698889c'::uuid)) AS s(screen_id),
-  (VALUES ('G'),('F'),('E'),('D'),('C')) AS r(row_label),
-  generate_series(1,18) AS n(num)
+SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c'::uuid, r.row_label, n.num, 'classic'
+FROM (VALUES ('G'),('F'),('E'),('D'),('C'),('B'),('A')) AS r(row_label),
+     generate_series(1, 18) AS n(num)
 UNION ALL
--- Row A: seats 6-18 only
-SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'A', n.num,
-  CASE WHEN n.num <= 13 THEN 'premium' ELSE 'economy' END
-FROM generate_series(6,18) AS n(num)
-UNION ALL
--- Row B: seats 1-5 and 14-18 (no centre)
-SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'B', n.num, 'economy'
-FROM unnest(ARRAY[1,2,3,4,5,14,15,16,17,18]) AS n(num)
-UNION ALL
--- Row S (Silver/Economy)
-SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'S', n.num, 'economy'
-FROM unnest(ARRAY[1,2,3,4,5,14,15,16,17,18]) AS n(num)
-UNION ALL
--- Row P (Gold/Premium)
-SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c', 'P', n.num, 'premium'
-FROM unnest(ARRAY[1,2,3,4,5,6,7,8,9,10,11]) AS n(num)
+SELECT 'a9f1a0e7-3f36-41b2-bb5b-43a0e698889c'::uuid, 'P', n.num, 'premium'
+FROM generate_series(1, 11) AS n(num)
 ON CONFLICT (screen_id, row_label, seat_number) DO NOTHING;

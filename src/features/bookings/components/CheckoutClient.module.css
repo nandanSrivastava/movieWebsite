@@ -1,0 +1,60 @@
+.grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.summary { min-width: 0; }
+.form { min-width: 0; }
+
+@media (min-width: 900px) {
+  .grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr);
+    grid-template-areas: 'form summary';
+    gap: 32px;
+  }
+  .form { grid-area: form; }
+  .summary {
+    grid-area: summary;
+    position: sticky;
+    top: calc(var(--header-height) + 20px);
+  }
+}
+
+/* Hold timer strip at the top of the bottom bar */
+.timer {
+  padding: 8px 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  background: var(--accent-bg);
+}
+.timer span { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.timer svg { width: 16px; height: 16px; color: var(--accent-ink); }
+.clock { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.timer a { color: var(--text-primary); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+
+.timerUrgent { background: rgba(255, 138, 61, 0.14); color: var(--text-primary); }
+.timerUrgent svg, .timerUrgent .clock { color: var(--urgent); }
+.timerExpired { background: var(--danger-bg); color: var(--text-primary); }
+.timerExpired svg { color: var(--danger); }
+
+.barTitle {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.barMeta {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.totalLabel { display: block; font-size: var(--fs-xs); color: var(--text-muted); }
+.totalAmount {
+  display: block;
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}

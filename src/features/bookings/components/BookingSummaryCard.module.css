@@ -1,0 +1,38 @@
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 20px;
+}
+
+.heading { font-size: var(--fs-xl); margin-bottom: 14px; }
+
+.seats {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed var(--border-strong);
+}
+.key { color: var(--text-muted); font-size: var(--fs-sm); }
+.seatList { font-weight: 700; color: var(--accent-ink); text-align: right; }
+
+.lines { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.line {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.line dd { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.each { color: var(--text-muted); }
+
+.total {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-default);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--text-primary);
+}

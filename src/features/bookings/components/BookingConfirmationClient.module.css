@@ -1,0 +1,65 @@
+.paid {
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.steps { display: flex; justify-content: center; }
+
+.banner {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.bannerIcon { color: var(--success); flex-shrink: 0; margin-top: 4px; }
+.bannerIcon svg { width: 28px; height: 28px; }
+.bannerTitle { font-family: var(--font-display); font-weight: 400; font-size: var(--fs-3xl); line-height: 1.05; }
+.bannerBody { margin-top: 4px; color: var(--text-secondary); font-size: var(--fs-sm); }
+.bannerBody strong { color: var(--text-primary); font-weight: 600; word-break: break-all; }
+
+.actions { display: flex; flex-direction: column; gap: 10px; }
+.actions > :first-child { width: 100%; }
+.secondary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.secondary > * { width: 100%; }
+.secondary > :only-child { grid-column: span 2; }
+
+.help {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  text-align: center;
+}
+.help a { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 3px; }
+
+.more { align-self: center; }
+
+/* Pending, failed and refund states */
+.state {
+  max-width: 460px;
+  margin: 0 auto;
+  min-height: 55vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+}
+.stateIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+}
+.stateIcon svg { width: 28px; height: 28px; }
+.urgent { background: rgba(255, 138, 61, 0.12); color: var(--urgent); }
+.danger { background: var(--danger-bg); color: var(--danger); }
+.stateTitle { font-size: var(--fs-2xl); }
+.stateBody { color: var(--text-secondary); line-height: 1.6; }
+.stateActions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 8px; }
+
+.bigSpinner { width: 40px; height: 40px; border-width: 3px; color: var(--accent); margin-bottom: 8px; }

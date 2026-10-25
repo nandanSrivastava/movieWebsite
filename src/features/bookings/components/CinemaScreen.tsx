@@ -1,38 +1,26 @@
 import React from 'react';
 
+// The screen as a lit, curved strip at the front of the hall, with a soft
+// spill of light toward the seats. Drawn inside the seat map so it scales with it.
 export default function CinemaScreen() {
   return (
-    <div style={{ width: '100%', maxWidth: '640px', margin: '20px auto 40px auto', textAlign: 'center', position: 'relative' }}>
-      <div style={{
-        height: '4px',
-        width: '100%',
-        background: 'linear-gradient(to right, transparent, var(--highlight-gold), transparent)',
-        boxShadow: '0 0 20px rgba(212, 175, 55, 0.8), 0 0 40px rgba(212, 175, 55, 0.4)',
-        borderRadius: '50%',
-        marginBottom: '15px'
-      }} />
-      <div style={{
-        position: 'absolute',
-        top: '4px',
-        left: '10%',
-        right: '10%',
-        height: '50px',
-        background: 'linear-gradient(to bottom, rgba(212, 175, 55, 0.06), transparent)',
-        clipPath: 'polygon(12% 0%, 88% 0%, 100% 100%, 0% 100%)',
-        pointerEvents: 'none',
-        zIndex: 0
-      }} />
-      <span style={{ 
-        fontSize: '0.75rem', 
-        letterSpacing: '5px', 
-        color: '#9CA3AF', 
-        fontWeight: 700, 
-        textTransform: 'uppercase',
-        position: 'relative',
-        zIndex: 1
-      }}>
-        ★ DHRUB CINEPLEX SCREEN ★
-      </span>
+    <div style={{ position: 'relative', width: '70%', margin: '4px auto 18px', textAlign: 'center' }}>
+      <svg viewBox="0 0 400 40" width="100%" height="34" aria-hidden preserveAspectRatio="none" style={{ display: 'block', overflow: 'visible' }}>
+        <defs>
+          <linearGradient id="screen-strip" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stopColor="var(--accent)" stopOpacity="0" />
+            <stop offset="0.5" stopColor="var(--accent)" stopOpacity="1" />
+            <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="screen-spill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor="var(--accent)" stopOpacity="0.16" />
+            <stop offset="1" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d="M0 14 Q200 -6 400 14 L380 40 Q200 22 20 40 Z" fill="url(#screen-spill)" />
+        <path d="M0 14 Q200 -6 400 14" fill="none" stroke="url(#screen-strip)" strokeWidth="3" strokeLinecap="round" />
+      </svg>
+      <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', letterSpacing: '0.08em' }}>Screen</span>
     </div>
   );
 }

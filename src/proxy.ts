@@ -14,10 +14,14 @@ export async function proxy(req: NextRequest) {
       try {
         const originUrl = new URL(origin);
         const hostHeader = host || req.nextUrl.host;
-        
-        const isAllowed = 
-          originUrl.host === hostHeader || 
-          originUrl.host.startsWith('localhost:') || 
+        // Any site can call itself "localhost" from a dev box, so a localhost
+        // Origin is only trusted outside production.
+        const isLocalDevOrigin =
+          process.env.NODE_ENV !== 'production' && originUrl.hostname === 'localhost';
+
+        const isAllowed =
+          originUrl.host === hostHeader ||
+          isLocalDevOrigin ||
           originUrl.protocol === 'capacitor:';
           
         if (!isAllowed) {
@@ -42,7 +46,12 @@ export async function proxy(req: NextRequest) {
       (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
 
     if (!isSupabaseConfigured) {
-      // ── MOCK MODE SECURITY GUARD ──────────────────────────────
+      // A production build never trusts the browser-written mock cookie
+      if (process.env.NODE_ENV === 'production') {
+        return NextResponse.redirect(new URL('/login?error=unavailable', req.url));
+      }
+
+      // ── MOCK MODE SECURITY GUARD (local development only) ─────
       const mockSession = req.cookies.get('cinebook_mock_session');
       
       if (!mockSession) {
@@ -76,7 +85,7 @@ export async function proxy(req: NextRequest) {
               return req.cookies.getAll();
             },
             setAll(cookiesToSet) {
-              cookiesToSet.forEach(({ name, value, options }) => req.cookies.set(name, value));
+              cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value));
               cookiesToSet.forEach(({ name, value, options }) =>
                 res.cookies.set(name, value, options)
               );
@@ -110,5 +119,13 @@ export async function proxy(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/counter/:path*', '/api/:path*']
+  matcher: [
+    '/admin/:path*',
+    '/counter/:path*',
+    // Every API route except two read-only, high-volume GETs that need no
+    // origin or role check: /api/seats/status (CDN-cached and polled by every
+    // open seat map) and /api/health (uptime probes). Skipping them saves a
+    // proxy invocation per poll. Everything else — cron included — stays covered.
+    '/api/((?!seats/status(?:/|$)|health(?:/|$)).*)',
+  ]
 };

@@ -1,0 +1,174 @@
+.wrap {
+  position: relative;
+  width: 100%;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.hint {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.viewport {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: 4px 0 12px;
+}
+.viewport::-webkit-scrollbar { display: none; }
+
+/* Fade the edge that has more seats beyond it */
+.viewport[data-fade-left] { mask-image: linear-gradient(to right, transparent, #000 32px); }
+.viewport[data-fade-right] { mask-image: linear-gradient(to left, transparent, #000 32px); }
+.viewport[data-fade-left][data-fade-right] {
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+
+.hall {
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+}
+
+.block {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.aisle { width: 24px; flex-shrink: 0; }
+
+.rowLabel {
+  width: 24px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.section {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 4px 0 6px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.section::before,
+.section::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-subtle);
+}
+.sectionPrice { font-weight: 500; color: var(--text-muted); }
+.sectionPremium { margin-top: 14px; color: var(--accent-ink); }
+.sectionPremium .sectionPrice { color: var(--accent-ink); }
+
+.walkway {
+  margin: 10px 0 6px;
+  text-align: center;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+/* ── Seats ─────────────────────────────────────────────────
+   Shape carries the state as well as colour:
+   outline = open, bottom bar = premium, solid = yours,
+   cross = sold, dashed = held by someone else. */
+.seat {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--seat-available-border);
+  border-radius: 10px 10px 5px 5px;
+  background: var(--seat-available);
+  color: var(--text-secondary);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color var(--t-fast), border-color var(--t-fast), color var(--t-fast), transform var(--t-fast);
+}
+@media (hover: hover) {
+  .seat:not([aria-disabled]):hover { border-color: var(--text-primary); color: var(--text-primary); }
+}
+.seat:not([aria-disabled]):active { transform: scale(0.9); }
+
+.premium {
+  border-color: var(--seat-premium-border);
+  color: var(--accent-ink);
+  box-shadow: inset 0 -4px 0 -1px var(--seat-premium-border);
+}
+
+.selected,
+.selected.premium {
+  background: var(--seat-selected);
+  border-color: var(--seat-selected-border);
+  color: var(--on-accent);
+  box-shadow: 0 0 0 3px var(--gold-glow);
+  animation: seatPick var(--dur-base) var(--ease-spring);
+}
+@media (hover: hover) {
+  .selected:not([aria-disabled]):hover { color: var(--on-accent); border-color: var(--seat-selected-border); }
+}
+
+.sold {
+  background: var(--seat-booked);
+  border-color: var(--seat-booked-border);
+  box-shadow: none;
+  color: transparent;
+  cursor: not-allowed;
+}
+.sold::before,
+.sold::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--seat-booked-mark);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+.sold::after { transform: translate(-50%, -50%) rotate(-45deg); }
+
+.held {
+  border-style: dashed;
+  border-color: var(--seat-locked-border);
+  background: var(--seat-locked);
+  box-shadow: none;
+  color: transparent;
+  cursor: not-allowed;
+}
+
+/* Zoomed out: numbers would be unreadable, so the seats read as shapes */
+.overview .seat span { visibility: hidden; }
+
+@keyframes seatPick {
+  0% { transform: scale(0.85); }
+  100% { transform: scale(1); }
+}

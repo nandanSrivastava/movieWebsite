@@ -135,7 +135,7 @@ async function runTest() {
     }
 
     const seatLayoutId = availableSeat.seat_layout_id;
-    const seatLabel = `${availableSeat.seat_layout?.row_label}-${availableSeat.seat_layout?.seat_number}`;
+    const seatLabel = seatLayoutId;
     console.log(`Targeting seat lock on available seat: "${seatLabel}" (Layout ID: ${seatLayoutId})`);
 
     // 3. Reset seat status just in case

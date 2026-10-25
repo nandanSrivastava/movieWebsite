@@ -1,180 +1,220 @@
 /* ════════════════════════════════════════════════════════
-   DHRUB CINEPLEX — PREMIUM DESIGN SYSTEM
-   Luxury Cinema Token Architecture
+   DHRUB CINEPLEX — DESIGN TOKENS
+   "Velvet & Marquee": the hall after the lights dim.
+   Velvet curtain for surfaces, the marquee's amber (from the
+   logo) as the one accent, ticket paper for text.
    ════════════════════════════════════════════════════════ */
 
 :root {
+  color-scheme: dark;
 
-  /* ── COLOUR PALETTE ─────────────────────────────────── */
-  /* Backgrounds: Deep space / Obsidian to make the bright orange pop */
-  --bg-void:       #030305;
-  --bg-primary:    #08080C;
-  --bg-secondary:  #0F0F16;
-  --bg-elevated:   #15151E;
-  --bg-card:       #0C0C12;
-  --bg-card-hover: #161620;
-  --bg-surface:    rgba(255,255,255,0.02);
-  --bg-glass:      rgba(15, 15, 22, 0.5);
-  --bg-tertiary:   #1C1C28;
+  /* ── PALETTE ────────────────────────────────────────── */
+  --velvet:        #140A10;
+  --curtain:       #24101C;
+  --marquee:       #FAA000;
+  --marquee-hover: #FFB733;
+  --ember:         #FF8A3D;
+  --ticket:        #F6E9D2;
+  --dust:          #CDBAC4;
 
-  /* Brand Amber (Maps to --gold-500 for compatibility) 
-     Based on logo: #faa000, #fac828 */
-  --gold-100: #FFF6E5;
-  --gold-200: #FFEDB2;
-  --gold-300: #FFD97F;
-  --gold-400: #FFC24C;
-  --gold-500: #FAA000;   /* Brand Amber from Logo */
+  /* Roles new components use */
+  --accent:       var(--marquee);
+  --accent-hover: var(--marquee-hover);
+  --accent-ink:   #FAA000;        /* accent used as text */
+  --on-accent:    #1A0C14;        /* text on an accent fill */
+  --urgent:       var(--ember);
+  --success:      #6BD49A;
+  --danger:       #FF7A7A;
+  --danger-bg:    rgba(255, 122, 122, 0.10);
+  --success-bg:   rgba(107, 212, 154, 0.10);
+  --accent-bg:    rgba(250, 160, 0, 0.10);
+  --focus-ring:   #FFB733;
+
+  /* Backgrounds */
+  --bg-void:       #0D0609;
+  --bg-primary:    #140A10;
+  --bg-secondary:  #1C0D16;
+  --bg-elevated:   #2A1321;
+  --bg-card:       #1A0C14;
+  --bg-card-hover: #24101C;
+  --bg-surface:    rgba(246, 233, 210, 0.03);
+  --bg-glass:      rgba(20, 10, 16, 0.78);
+  --bg-tertiary:   #301626;
+
+  /* Amber scale (legacy names kept for admin and counter screens) */
+  --gold-100: #FFF4DC;
+  --gold-200: #FFE3A8;
+  --gold-300: #FFCB66;
+  --gold-400: #FFB733;
+  --gold-500: #FAA000;
   --gold-600: #D68500;
-  --gold-glow: rgba(250, 160, 0, 0.25);
-  --gold-glow-strong: rgba(250, 160, 0, 0.5);
+  --gold-glow: rgba(250, 160, 0, 0.22);
+  --gold-glow-strong: rgba(250, 160, 0, 0.42);
 
-  /* Legacy aliases */
-  --highlight-gold:       var(--gold-500);
+  --highlight-gold:       var(--accent-ink);
   --highlight-gold-hover: var(--gold-400);
   --highlight-gold-glow:  var(--gold-glow);
 
-  /* Brand Fiery Orange (Maps to --crimson for compatibility) 
-     Based on logo: #f06e00, #f08200 */
-  --crimson:       #F06E00; /* Vibrant Orange */
-  --crimson-hover: #FF851A;
-  --crimson-glow:  rgba(240, 110, 0, 0.35);
+  --crimson:       var(--ember);
+  --crimson-hover: #FFA066;
+  --crimson-glow:  rgba(255, 138, 61, 0.28);
   --accent-crimson:       var(--crimson);
   --accent-crimson-hover: var(--crimson-hover);
   --accent-crimson-glow:  var(--crimson-glow);
-  --accent-green:         #10B981;
+  --accent-green:         var(--success);
 
-  /* Text hierarchy (Crisp whites & muted golds) */
-  --text-primary:   #F8F9FA;
-  --text-secondary: #B4B9C8;
-  --text-muted:     #788099;
-  --text-disabled:  #42485E;
+  /* Text */
+  --text-primary:   #F6E9D2;
+  --text-secondary: #CDBAC4;
+  --text-muted:     #A48C99;
+  --text-disabled:  #5E4955;
 
   /* Borders */
-  --border-subtle:  rgba(255, 255, 255, 0.05);
-  --border-default: rgba(255, 255, 255, 0.08);
-  --border-strong:  rgba(255, 255, 255, 0.15);
-  --border-gold:    rgba(212, 175, 55, 0.3);
-  --border-crimson: rgba(139, 30, 40, 0.4);
+  --border-subtle:  rgba(246, 233, 210, 0.07);
+  --border-default: rgba(246, 233, 210, 0.12);
+  --border-strong:  rgba(246, 233, 210, 0.22);
+  --border-gold:    rgba(250, 160, 0, 0.45);
+  --border-crimson: rgba(255, 138, 61, 0.45);
 
-  /* Seat Status */
-  --seat-available:        #121626;
-  --seat-available-border: #232A40;
-  --seat-locked:           #4A2311;
-  --seat-locked-border:    #73361A;
-  --seat-booked:           #241214;
-  --seat-booked-border:    #381A1D;
-  --seat-selected:         var(--gold-500);
-  --seat-selected-border:  var(--gold-400);
+  /* Seats */
+  --seat-available:        transparent;
+  --seat-available-border: #7D6672;
+  --seat-premium-border:   #C98A1E;
+  --seat-locked:           rgba(255, 138, 61, 0.12);
+  --seat-locked-border:    #B8682F;
+  --seat-booked:           #2E1D27;
+  --seat-booked-border:    #3D2A35;
+  --seat-booked-mark:      #8A7380;
+  --seat-selected:         var(--marquee);
+  --seat-selected-border:  var(--marquee-hover);
 
-  --category-normal:   #B4B9C8;
-  --category-premium:  #60A5FA;
-  --category-recliner: var(--gold-500);
+  --category-normal:   var(--text-secondary);
+  --category-premium:  var(--marquee);
+  --category-recliner: var(--marquee);
 
-  /* ── TYPOGRAPHY ─────────────────────────────────────── */
-  --font-display: var(--font-cinzel), 'Cinzel', 'Playfair Display', serif;
-  --font-heading: var(--font-outfit), 'Outfit', 'Inter', sans-serif;
-  --font-body:    var(--font-inter), 'Inter', system-ui, sans-serif;
-  --font-playfair: var(--font-playfair), 'Playfair Display', serif;
-  --font-mono:    'JetBrains Mono', 'Fira Code', monospace;
-
-  /* Legacy aliases */
+  /* ── TYPE ───────────────────────────────────────────── */
+  /* Rozha One: Hindi film title cards. Mukta: Latin + Devanagari UI text. */
+  --font-display: var(--font-rozha), 'Rozha One', Georgia, serif;
+  --font-body:    var(--font-mukta), 'Mukta', system-ui, sans-serif;
+  --font-heading: var(--font-body);
+  --font-playfair: var(--font-display);
+  --font-mono:    ui-monospace, 'SFMono-Regular', Menlo, monospace;
   --font-family-body:    var(--font-body);
-  --font-family-heading: var(--font-heading);
+  --font-family-heading: var(--font-body);
+  --font-family-base:    var(--font-body);
 
-  /* ── SPACING & LAYOUT ───────────────────────────────── */
-  --max-width:    1440px;
-  --header-height: 80px;
+  /* Traditional scale: 12 14 16 18 21 24 36 48 60 72 */
+  --fs-xs:  0.75rem;
+  --fs-sm:  0.875rem;
+  --fs-md:  1rem;
+  --fs-lg:  1.125rem;
+  --fs-xl:  1.3125rem;
+  --fs-2xl: 1.5rem;
+  --fs-3xl: 2.25rem;
+  --fs-4xl: 3rem;
+  --fs-5xl: 3.75rem;
+  --fs-6xl: 4.5rem;
 
-  --radius-xs:   4px;
-  --radius-sm:   8px;
-  --radius-md:   12px;
-  --radius-lg:   20px;
-  --radius-xl:   32px;
+  /* ── LAYOUT ─────────────────────────────────────────── */
+  --max-width:     1280px;
+  --header-height: 64px;
+  --bottom-nav-height: 64px;
+  --gutter: clamp(16px, 4vw, 48px);
+
+  /* Radius by role, not one radius for everything */
+  --radius-xs:   4px;   /* seats, small badges */
+  --radius-sm:   8px;   /* chips, inputs, buttons */
+  --radius-md:   12px;  /* panels */
+  --radius-lg:   18px;  /* sheets, dialogs */
+  --radius-xl:   28px;
   --radius-full: 9999px;
-
-  /* Legacy */
   --border-radius-sm:   var(--radius-xs);
   --border-radius-md:   var(--radius-sm);
   --border-radius-lg:   var(--radius-lg);
   --border-radius-full: var(--radius-full);
 
-  /* ── SHADOWS & GLOWS ────────────────────────────────── */
-  --shadow-sm:  0 2px 4px rgba(0,0,0,0.4);
-  --shadow-md:  0 8px 24px rgba(0,0,0,0.5);
-  --shadow-lg:  0 16px 48px rgba(0,0,0,0.6);
-  --shadow-xl:  0 30px 80px rgba(0,0,0,0.8);
-  --glow-gold:   0 0 25px var(--gold-glow), 0 0 60px rgba(212, 175, 55, 0.1);
-  --glow-crimson: 0 0 25px var(--crimson-glow);
+  /* ── DEPTH ──────────────────────────────────────────── */
+  --shadow-sm:  0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md:  0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-lg:  0 18px 48px rgba(0, 0, 0, 0.5);
+  --shadow-xl:  0 28px 72px rgba(0, 0, 0, 0.6);
+  --glow-gold:   0 0 0 1px var(--border-gold), 0 8px 28px var(--gold-glow);
+  --glow-crimson: 0 0 24px var(--crimson-glow);
 
-  /* ── TRANSITIONS (Emil Kowalski inspired) ────────────────────────────── */
-  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  /* ── MOTION ─────────────────────────────────────────── */
+  --ease-out:         cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out:      cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring:      cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ease-out-expo:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart:   cubic-bezier(0.25, 1, 0.5, 1);
   --ease-in-out-circ: cubic-bezier(0.85, 0, 0.15, 1);
-  --ease-snappy: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
-  
-  --t-fast:   0.2s var(--ease-snappy);
-  --t-normal: 0.4s var(--ease-out-expo);
-  --t-slow:   0.7s var(--ease-smooth);
+  --ease-snappy:      cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-smooth:      cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 360ms;
 
-  /* Legacy */
+  --t-fast:   var(--dur-fast) var(--ease-out);
+  --t-normal: var(--dur-base) var(--ease-out);
+  --t-slow:   var(--dur-slow) var(--ease-out);
   --transition-fast:   var(--t-fast);
   --transition-normal: var(--t-normal);
   --transition-slow:   var(--t-slow);
 }
 
-/* ── LIGHT THEME OVERRIDES ────────────────────────────── */
+/* ── LIGHT THEME: "Matinee" — ticket paper, velvet ink ── */
 .light {
-  /* Backgrounds: Brighter, off-white to make it feel fresh */
-  --bg-void:       #F8F9FA;
-  --bg-primary:    #FFFFFF;
-  --bg-secondary:  #F1F3F5;
-  --bg-elevated:   #E9ECEF;
-  --bg-card:       #FFFFFF;
-  --bg-card-hover: #F8F9FA;
-  --bg-surface:    rgba(0,0,0,0.03);
-  --bg-glass:      rgba(255, 255, 255, 0.7);
-  --bg-tertiary:   #DEE2E6;
+  color-scheme: light;
 
-  /* Gold/Amber can stay mostly the same or be adjusted for contrast */
-  /* We might want a darker amber for text on light backgrounds */
-  --gold-glow: rgba(250, 160, 0, 0.15);
-  --gold-glow-strong: rgba(250, 160, 0, 0.3);
+  --accent-ink: #854A00;
+  --on-accent:  #2A1420;
+  --urgent:     #A63F06;
+  --success:    #1A6640;
+  --danger:     #B42318;
+  --danger-bg:  rgba(180, 35, 24, 0.08);
+  --success-bg: rgba(26, 102, 64, 0.08);
+  --accent-bg:  rgba(250, 160, 0, 0.14);
+  --focus-ring: #854A00;
 
-  --crimson:       #D9480F; /* slightly darker for better contrast */
-  --crimson-hover: #F06E00;
-  --crimson-glow:  rgba(217, 72, 15, 0.2);
-  --accent-green:  #059669;
+  --bg-void:       #EDE2CE;
+  --bg-primary:    #F6EDDC;
+  --bg-secondary:  #EFE3CD;
+  --bg-elevated:   #E6D6BC;
+  --bg-card:       #FFFAF0;
+  --bg-card-hover: #FBF3E3;
+  --bg-surface:    rgba(42, 20, 32, 0.03);
+  --bg-glass:      rgba(246, 237, 220, 0.85);
+  --bg-tertiary:   #DCCAAE;
 
-  /* Text hierarchy for light mode */
-  --text-primary:   #212529;
-  --text-secondary: #495057;
-  --text-muted:     #868E96;
-  --text-disabled:  #ADB5BD;
+  --gold-glow: rgba(250, 160, 0, 0.18);
+  --gold-glow-strong: rgba(250, 160, 0, 0.32);
 
-  /* Borders */
-  --border-subtle:  rgba(0, 0, 0, 0.05);
-  --border-default: rgba(0, 0, 0, 0.1);
-  --border-strong:  rgba(0, 0, 0, 0.15);
-  --border-gold:    rgba(250, 160, 0, 0.3);
-  --border-crimson: rgba(217, 72, 15, 0.3);
+  --crimson:       #A63F06;
+  --crimson-hover: #C4520F;
+  --crimson-glow:  rgba(166, 63, 6, 0.18);
 
-  /* Seat Status (Light mode inverted) */
-  --seat-available:        #FFFFFF;
-  --seat-available-border: #CED4DA;
-  --seat-locked:           #FFE3E3;
-  --seat-locked-border:    #FFA8A8;
-  --seat-booked:           #E9ECEF;
-  --seat-booked-border:    #CED4DA;
-  --seat-selected:         var(--gold-500);
-  --seat-selected-border:  #D68A00;
+  --text-primary:   #2A1420;
+  --text-secondary: #553D4A;
+  --text-muted:     #69505F;
+  --text-disabled:  #A8939E;
 
-  --category-normal:   #495057;
-  --category-premium:  #1C7ED6;
-  
-  /* Update shadow colors for light mode */
-  --shadow-sm:  0 2px 4px rgba(0,0,0,0.05);
-  --shadow-md:  0 8px 24px rgba(0,0,0,0.08);
-  --shadow-lg:  0 16px 48px rgba(0,0,0,0.12);
-  --shadow-xl:  0 30px 80px rgba(0,0,0,0.15);
+  --border-subtle:  rgba(42, 20, 32, 0.08);
+  --border-default: rgba(42, 20, 32, 0.14);
+  --border-strong:  rgba(42, 20, 32, 0.24);
+  --border-gold:    rgba(133, 74, 0, 0.45);
+  --border-crimson: rgba(166, 63, 6, 0.4);
+
+  --seat-available-border: #8E7682;
+  --seat-premium-border:   #A86A00;
+  --seat-locked:           rgba(166, 63, 6, 0.10);
+  --seat-locked-border:    #B4602A;
+  --seat-booked:           #E1D2BA;
+  --seat-booked-border:    #CDBB9F;
+  --seat-booked-mark:      #7E6872;
+  --seat-selected-border:  #C27C00;
+
+  --shadow-sm:  0 1px 2px rgba(42, 20, 32, 0.08);
+  --shadow-md:  0 8px 24px rgba(42, 20, 32, 0.10);
+  --shadow-lg:  0 18px 48px rgba(42, 20, 32, 0.12);
+  --shadow-xl:  0 28px 72px rgba(42, 20, 32, 0.16);
 }

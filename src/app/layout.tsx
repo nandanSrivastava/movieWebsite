@@ -5,31 +5,23 @@ import { ToastProvider } from "@/features/shared/context/ToastContext";
 import { AuthProvider } from "@/features/auth/context/AuthContext";
 import MockAuthSwitcher from "@/features/auth/components/MockAuthSwitcher";
 import { QueryProvider } from "@/features/shared/components/QueryProvider";
-import { Cinzel, Inter, Outfit, Playfair_Display } from "next/font/google";
+import { Mukta, Rozha_One } from "next/font/google";
 import { ThemeProvider } from "@/features/shared/components/ThemeProvider";
 import { Analytics } from "@vercel/analytics/next";
 
-const cinzel = Cinzel({ 
-  subsets: ["latin"],
-  variable: "--font-cinzel",
+// Display: Rozha One (Hindi film title-card face). Text: Mukta (by Ek Type).
+// Both carry Devanagari, so Hindi labels render in the same voice.
+const rozha = Rozha_One({
+  weight: "400",
+  subsets: ["latin", "devanagari"],
+  variable: "--font-rozha",
   display: "swap",
 });
 
-const inter = Inter({ 
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const outfit = Outfit({ 
-  subsets: ["latin"],
-  variable: "--font-outfit",
-  display: "swap",
-});
-
-const playfair = Playfair_Display({
-  subsets: ["latin"],
-  variable: "--font-playfair",
+const mukta = Mukta({
+  weight: ["400", "500", "600", "700"],
+  subsets: ["latin", "devanagari"],
+  variable: "--font-mukta",
   display: "swap",
 });
 
@@ -37,8 +29,7 @@ export const viewport: Viewport = {
   themeColor: "#05060A",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // Pinch-zoom stays enabled (accessibility: low-vision users must be able to zoom)
   viewportFit: "cover",
 };
 
@@ -93,7 +84,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="scroll-smooth" suppressHydrationWarning>
+    <html lang="en-IN" className={`${rozha.variable} ${mukta.variable}`} suppressHydrationWarning>
       <head>
         <script
           type="application/ld+json"
@@ -115,7 +106,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className={`antialiased min-h-screen bg-void text-primary selection:bg-gold-500/30 selection:text-gold-200 ${cinzel.variable} ${inter.variable} ${outfit.variable} ${playfair.variable}`}>
+      <body>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           <ErrorBoundary>
             <QueryProvider>

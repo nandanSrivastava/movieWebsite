@@ -1,0 +1,175 @@
+/* Paper is paper in both themes: cream stock, velvet ink */
+.ticket {
+  --paper: #F6E9D2;
+  --paper-shade: #EBDAB9;
+  --ink: #2A1420;
+  --ink-soft: #5C4250;
+  --notch: var(--bg-void);
+
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+  margin: 0 auto;
+  color: var(--ink);
+  background:
+    radial-gradient(120% 60% at 50% 0%, #FBF3E4 0%, transparent 70%),
+    var(--paper);
+  border-radius: var(--radius-md);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 24px 48px rgba(0, 0, 0, 0.45);
+  font-family: var(--font-body);
+  animation: print 900ms var(--ease-out) both;
+}
+
+/* The one orchestrated moment: the ticket feeds out of the printer */
+@keyframes print {
+  from { clip-path: inset(0 0 100% 0 round 12px); transform: translateY(-12px); }
+  to { clip-path: inset(0 0 0 0 round 12px); transform: none; }
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(42, 20, 32, 0.12);
+}
+.logo { width: 26px; height: 26px; border-radius: 6px; object-fit: cover; }
+.brandName { font-family: var(--font-display); font-size: var(--fs-lg); line-height: 1; }
+.brandPlace { margin-left: auto; font-size: var(--fs-xs); color: var(--ink-soft); }
+
+.main { padding: 18px 20px 20px; }
+
+.title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: var(--fs-4xl);
+  line-height: 1;
+  color: var(--ink);
+  text-wrap: balance;
+}
+
+.meta {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 16px;
+  margin-top: 18px;
+}
+.facts dt { font-size: var(--fs-xs); color: var(--ink-soft); }
+.facts dd { font-weight: 700; font-size: var(--fs-lg); line-height: 1.25; }
+.wide { grid-column: span 1; }
+.seats { color: #8A4A00; }
+
+/* Tear line with punched notches cut out of each edge */
+.perforation {
+  position: relative;
+  height: 0;
+  border-top: 2px dashed rgba(42, 20, 32, 0.28);
+  margin: 0 16px;
+}
+.perforation::before,
+.perforation::after {
+  content: '';
+  position: absolute;
+  top: -13px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--notch);
+}
+.perforation::before { left: -29px; }
+.perforation::after { right: -29px; }
+
+.stub {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  background: linear-gradient(to bottom, transparent, rgba(235, 218, 185, 0.6));
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
+.qrWrap { position: relative; }
+.qr {
+  width: 188px;
+  height: 188px;
+  padding: 10px;
+  background: #FFFFFF;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(42, 20, 32, 0.12);
+}
+.qrPending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  background: var(--paper-shade);
+}
+
+.used {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(-12deg);
+  padding: 6px 10px;
+  border: 2px solid #B42318;
+  border-radius: 6px;
+  background: rgba(246, 233, 210, 0.92);
+  color: #B42318;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admit {
+  margin-top: 14px;
+  font-family: var(--font-display);
+  font-size: var(--fs-2xl);
+  line-height: 1;
+}
+.instruction { margin-top: 4px; font-size: var(--fs-sm); color: var(--ink-soft); }
+
+.bookingId {
+  margin-top: 12px;
+  font-size: var(--fs-xs);
+  color: var(--ink-soft);
+}
+.bookingId span {
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: 0.08em;
+  user-select: all;
+}
+
+.receipt {
+  width: 100%;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(42, 20, 32, 0.12);
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-sm);
+}
+.receipt div { display: flex; justify-content: space-between; gap: 12px; }
+.receipt dt { color: var(--ink-soft); }
+.receipt dd { font-weight: 600; text-align: right; }
+.ref { font-weight: 500; word-break: break-all; }
+
+@media print {
+  .ticket {
+    animation: none;
+    box-shadow: none;
+    border: 1px solid #000;
+    --notch: #fff;
+  }
+}

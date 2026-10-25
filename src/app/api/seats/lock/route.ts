@@ -1,112 +1,60 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db';
-import { createClient } from '@supabase/supabase-js';
-import { rateLimiter } from '@/lib/rateLimit';
+import { rateLimit } from '@/lib/rateLimit';
+import { getClientIp, getHoldOwner, setGuestCookie } from '@/lib/requestAuth';
 
 const lockRequestSchema = z.object({
-  showId: z.string().min(1),
-  seatLayoutIds: z.array(z.string().min(1)).min(1),
-  anonSessionId: z.string().uuid().optional(),
+  showId: z.string().min(1).max(100),
+  seatLayoutIds: z.array(z.string().min(1).max(100)).min(1).max(10)
+    .refine(ids => new Set(ids).size === ids.length, 'Duplicate seats'),
 });
+
+const HOLD_MS = 8 * 60 * 1000;
+
+const LOCK_ERRORS: Record<string, { status: number; error: string }> = {
+  taken: { status: 409, error: 'One or more selected seats were just taken by another customer. Please pick different seats.' },
+  owner_cap: { status: 409, error: 'You can hold at most 10 seats at a time. Finish or cancel your other booking first.' },
+  ip_cap: { status: 429, error: 'Too many seats are being held from your network right now. Please try again in a few minutes.' },
+  show_started: { status: 400, error: 'Cannot book seats for a show that has already started or is in the past.' },
+  invalid: { status: 400, error: 'Those seats are not available for this show.' },
+};
 
 export async function POST(req: NextRequest) {
   try {
-    // 0. Rate limiting check
-    const ip = req.headers.get('x-forwarded-for') || '127.0.0.1';
-    if (rateLimiter.isRateLimited(ip, 15, 60000)) {
-      return NextResponse.json({ error: 'Too many request attempts. Please wait a minute before trying again.' }, { status: 429 });
-    }
-    // 1. Get body payload and validate
-    const body = await req.json();
-    const result = lockRequestSchema.safeParse(body);
+    const ip = getClientIp(req);
+    const limited = await rateLimit(`lock:${ip || 'unknown'}`, 20, 60, 'Too many seat requests. Please wait a minute before trying again.');
+    if (limited) return limited;
+
+    const result = lockRequestSchema.safeParse(await req.json().catch(() => null));
     if (!result.success) {
-      return NextResponse.json({ error: 'Invalid inputs', details: result.error.format() }, { status: 400 });
+      return NextResponse.json({ error: 'Invalid inputs' }, { status: 400 });
     }
-    const { showId, seatLayoutIds, anonSessionId } = result.data;
+    const { showId, seatLayoutIds } = result.data;
 
-    // 2. Identify User Session (authenticated or anonymous)
-    let userId: string | null = null;
-    const isSupabaseConfigured =
-      !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
-      (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+    // Signed-in user, or a guest id the server issues in an httpOnly cookie
+    const { owner, user, newGuestId } = await getHoldOwner(req, true);
 
-    if (!isSupabaseConfigured) {
-      // Mock mode auth resolution
-      const mockSession = req.cookies.get('cinebook_mock_session');
-      if (mockSession) {
-        try {
-          const sessionObj = JSON.parse(mockSession.value);
-          userId = sessionObj.id;
-        } catch {}
-      }
-    } else {
-      // Live mode auth resolution
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-      // Fetch session
-      const authHeader = req.headers.get('Authorization') || '';
-      const token = authHeader.replace('Bearer ', '');
-
-      let userRes;
-      if (token) {
-        userRes = await supabase.auth.getUser(token);
-      } else {
-        // Fallback to checking request cookies
-        userRes = await supabase.auth.getUser();
-      }
-
-      if (userRes.data.user) {
-        userId = userRes.data.user.id;
-      }
+    // lock_seats also refuses shows that have started, so this is one round trip
+    const outcome = await db.lockSeats(showId, seatLayoutIds, owner!, ip);
+    if (outcome !== 'ok') {
+      const { status, error } = LOCK_ERRORS[outcome] || LOCK_ERRORS.invalid;
+      const response = NextResponse.json({ success: false, reason: outcome, error }, { status });
+      if (newGuestId) setGuestCookie(response, newGuestId);
+      return response;
     }
 
-    // Fall back to anonymous session ID if no authenticated user
-    if (!userId && anonSessionId) {
-      userId = anonSessionId;
-    }
+    // Holds last 8 minutes (lock_seats); the client only uses this for display
+    const expiresAt = new Date(Date.now() + HOLD_MS).toISOString();
 
-    if (!userId) {
-      return NextResponse.json({ error: 'Please sign in or allow anonymous session to continue.' }, { status: 401 });
-    }
+    after(() => db.logAudit(user?.id ?? null, 'SEAT_LOCK', { showId, seatLayoutIds, guest: !user }, ip || undefined)
+      .catch(err => console.error('Seat lock audit failed:', err)));
 
-    // 2.5. Verify Show is not in the past.
-    // show_date is "YYYY-MM-DD" and show_time is "HH:mm" (theater local time = IST).
-    // Parse with the explicit IST offset so the comparison is correct even when the
-    // server runs in UTC (e.g. Vercel) — a bare `new Date('YYYY-MM-DDTHH:mm')` would
-    // be interpreted in server-local time and wrongly allow/block bookings.
-    const show = await db.getShowById(showId);
-    if (!show) {
-      return NextResponse.json({ error: 'Show not found' }, { status: 404 });
-    }
-    const showDateTime = new Date(`${show.show_date}T${show.show_time}+05:30`);
-    if (isNaN(showDateTime.getTime())) {
-      return NextResponse.json({ error: 'Invalid show date/time' }, { status: 400 });
-    }
-    if (showDateTime.getTime() < Date.now()) {
-      return NextResponse.json({ error: 'Cannot book seats for a show that has already started or is in the past.' }, { status: 400 });
-    }
-
-    // 3. Invoke Atomic Transaction Locking
-    const success = await db.lockSeats(showId, seatLayoutIds, userId);
-
-    if (!success) {
-      return NextResponse.json({
-        success: false,
-        error: 'One or more selected seats have already been locked or booked by another customer. Please refresh and try again.'
-      }, { status: 409 });
-    }
-
-    // 4. Log Audit Event
-    const isAnon = !!anonSessionId && userId === anonSessionId;
-    await db.logAudit(isAnon ? null : userId, 'SEAT_LOCK', { showId, seatLayoutIds, holdSeconds: 360, anonymous: isAnon }, ip);
-
-    return NextResponse.json({ success: true });
-  } catch (err: any) {
+    const response = NextResponse.json({ success: true, expiresAt });
+    if (newGuestId) setGuestCookie(response, newGuestId);
+    return response;
+  } catch (err) {
     console.error('Seat lock API error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Could not hold seats right now. Please try again.' }, { status: 500 });
   }
 }
-

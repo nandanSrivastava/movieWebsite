@@ -1,138 +1,144 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
+import { ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
+import { posterImgProps } from '@/features/shared/utils/posterImage';
+import { formatDuration, formatShowTime, hasShowStarted } from '@/features/shared/utils/format';
+import styles from './HeroCarousel.module.css';
 
-export default function HeroCarousel({ movies }: { movies: any[] }) {
-  const [currentIndex, setCurrentIndex] = useState(0);
+type HeroShow = { id: string; show_time: string; show_date: string };
+const ROTATE_MS = 7000;
+const MAX_TIMES = 4;
+
+export default function HeroCarousel({ movies, todaysShows = {}, renderedAt }: {
+  movies: any[];
+  todaysShows?: Record<string, HeroShow[]>;
+  renderedAt: number;
+}) {
+  const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);     // pressed pause, or navigated by hand
+  const [hovering, setHovering] = useState(false); // pointer or focus inside
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [now, setNow] = useState(renderedAt);
+  const sectionRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
-    if (movies.length <= 1) return;
-    const timer = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % movies.length);
-    }, 6000);
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReducedMotion(mq.matches);
+    const onChange = () => setReducedMotion(mq.matches);
+    mq.addEventListener('change', onChange);
+    setNow(Date.now());
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+
+  const rotating = movies.length > 1 && !paused && !hovering && !reducedMotion;
+  useEffect(() => {
+    if (!rotating) return;
+    const timer = setInterval(() => setIndex(i => (i + 1) % movies.length), ROTATE_MS);
     return () => clearInterval(timer);
-  }, [movies.length]);
+  }, [rotating, movies.length]);
 
   if (!movies.length) return null;
 
+  const go = (step: number) => {
+    setPaused(true);
+    setIndex(i => (i + step + movies.length) % movies.length);
+  };
+
+  const movie = movies[index];
+  const times = (todaysShows[movie.id] || []).filter(s => !hasShowStarted(s.show_date, s.show_time, now));
+
   return (
-    <section className="premium-hero">
-      <div className="ambient-orb orb-crimson" />
-      <div className="ambient-orb orb-gold" />
-      
-      {movies.map((hero, index) => {
-        const isActive = index === currentIndex;
-        return (
-          <div
-            key={`bg-${hero.id}`}
-              style={{
-              position: 'absolute',
-              inset: 0,
-              opacity: isActive ? 1 : 0,
-              visibility: isActive ? 'visible' : 'hidden',
-              transition: 'opacity 1.2s var(--ease-smooth)',
-              zIndex: 0
-            }}
-          >
-            <div className="premium-hero-bg">
-              <Image src={hero.poster_url} alt={hero.title} fill priority={index === 0} style={{ objectFit: 'cover' }} />
-            </div>
-            <div className="premium-vignette" />
-            <div className="premium-gradient" />
-          </div>
-        );
-      })}
-
-      <div style={{ position: 'relative', zIndex: 2, perspective: '1200px', width: '100%', display: 'flex', justifyContent: 'center' }}>
-        {movies.map((hero, index) => {
-          const isActive = index === currentIndex;
-          return (
-            <div
-              key={`content-${hero.id}`}
-              className="hero-content-wrapper"
-              style={{
-                position: isActive ? 'relative' : 'absolute',
-                top: 0,
-                opacity: isActive ? 1 : 0,
-                visibility: isActive ? 'visible' : 'hidden',
-                transform: isActive ? 'scale(1) translateY(0)' : 'scale(0.95) translateY(20px)',
-                transformOrigin: 'center center',
-                transition: isActive
-                  ? 'opacity 0.6s var(--ease-out-expo) 0.3s, transform 0.6s var(--ease-snappy) 0.3s, visibility 0.6s 0.3s'
-                  : 'opacity 0.3s var(--ease-out-expo), transform 0.3s var(--ease-snappy), visibility 0.3s',
-                pointerEvents: isActive ? 'auto' : 'none'
-              }}
-            >
-              <div className="hero-badge">
-                <div className="hero-badge-dot" />
-                Premiere Screenings
-              </div>
-
-              <h1 className="premium-title">
-                {hero.title}
-              </h1>
-
-              <div className="premium-meta">
-                <span style={{ color: 'var(--gold-500)' }}>{hero.certification}</span>
-                <div className="meta-dot" />
-                <span>{hero.genre}</span>
-                <div className="meta-dot" />
-                <span>{hero.duration_minutes} min</span>
-                <div className="meta-dot" />
-                <span>{hero.language}</span>
-              </div>
-
-              <p className="premium-synopsis">
-                {hero.synopsis}
-              </p>
-
-              <div className="premium-actions flex flex-col sm:flex-row items-center justify-center gap-3 w-full max-w-sm sm:max-w-md mx-auto">
-                <Link href={`/movies/${hero.id}`} className="btn-premium btn-book w-full sm:w-auto text-center py-3.5 px-6 rounded-xl font-bold text-sm">
-                  Get Tickets
-                </Link>
-                <Link href={`/movies/${hero.id}`} className="btn-premium btn-trailer w-full sm:w-auto text-center py-3.5 px-6 rounded-xl font-bold text-sm">
-                  Watch Info & Trailer
-                </Link>
-              </div>
-            </div>
-          );
-        })}
+    <section
+      ref={sectionRef}
+      className={styles.hero}
+      aria-roledescription="carousel"
+      aria-label="Now showing"
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
+      onFocus={() => setHovering(true)}
+      onBlur={(e) => { if (!sectionRef.current?.contains(e.relatedTarget as Node)) setHovering(false); }}
+    >
+      <div key={`bg-${movie.id}`} className={styles.backdrop} aria-hidden>
+        <img {...posterImgProps(movie.poster_url, '', 96, 144, index === 0)} alt="" />
       </div>
 
-      {movies.length > 1 && (
-        <div style={{ position: 'absolute', bottom: '20px', left: '50%', transform: 'translateX(-50%)', zIndex: 10, display: 'flex', gap: '8px' }}>
-          {movies.map((_, i) => (
-            <button
-              key={i}
-              onClick={() => setCurrentIndex(i)}
-              style={{
-                width: '48px',
-                height: '48px',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: 0
-              }}
-              aria-label={`Go to slide ${i + 1}`}
-            >
-              <div
-                style={{
-                  width: i === currentIndex ? '32px' : '10px',
-                  height: '8px',
-                  borderRadius: '4px',
-                  background: i === currentIndex ? 'var(--gold-500)' : 'rgba(255,255,255,0.4)',
-                  transition: 'all 0.5s var(--ease-spring)'
-                }}
-              />
-            </button>
-          ))}
+      <div className={`container ${styles.inner}`}>
+        <div
+          key={movie.id}
+          className={styles.slide}
+          role="group"
+          aria-roledescription="slide"
+          aria-label={`${index + 1} of ${movies.length}: ${movie.title}`}
+        >
+          <Link href={`/movies/${movie.id}`} className={styles.poster} tabIndex={-1} aria-hidden>
+            <img {...posterImgProps(movie.poster_url, '', 400, 600, index === 0)} alt="" />
+          </Link>
+
+          <div className={styles.copy}>
+            <p className={styles.kicker}>Now showing</p>
+            <h1 className={`display ${styles.title}`}>{movie.title}</h1>
+            <ul className={styles.meta} aria-label="Film details">
+              {movie.certification && <li className={styles.cert}>{movie.certification}</li>}
+              {movie.duration_minutes ? <li>{formatDuration(movie.duration_minutes)}</li> : null}
+              {movie.language && <li>{movie.language}</li>}
+            </ul>
+          </div>
+
+          <div className={styles.details}>
+            {movie.synopsis && <p className={styles.synopsis}>{movie.synopsis}</p>}
+
+            {times.length > 0 ? (
+              <div className={styles.today}>
+                <p className={styles.todayLabel}>Today</p>
+                <ul className={styles.times}>
+                  {times.slice(0, MAX_TIMES).map(s => (
+                    <li key={s.id}>
+                      <Link href={`/booking/${s.id}`} className={styles.time} aria-label={`Book today at ${formatShowTime(s.show_time)}`}>
+                        {formatShowTime(s.show_time)}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            <div className={styles.actions}>
+              <Link href={`/movies/${movie.id}#showtimes`} className="btn btn-primary btn-lg">
+                {times.length > 0 ? 'All showtimes' : 'Book tickets'}
+              </Link>
+              {movie.trailer_url && (
+                <Link href={`/movies/${movie.id}#trailer`} className="btn btn-ghost btn-lg">Watch trailer</Link>
+              )}
+            </div>
+          </div>
         </div>
-      )}
+
+        {movies.length > 1 && (
+          <div className={styles.controls}>
+            <button type="button" className={styles.control} onClick={() => go(-1)} aria-label="Previous film">
+              <ChevronLeft aria-hidden />
+            </button>
+            <span className={styles.position} aria-live={rotating ? 'off' : 'polite'}>
+              {index + 1} / {movies.length}
+            </span>
+            <button type="button" className={styles.control} onClick={() => go(1)} aria-label="Next film">
+              <ChevronRight aria-hidden />
+            </button>
+            {!reducedMotion && (
+              <button
+                type="button"
+                className={styles.control}
+                onClick={() => setPaused(p => !p)}
+                aria-label={paused ? 'Resume rotating films' : 'Pause rotating films'}
+              >
+                {paused ? <Play aria-hidden /> : <Pause aria-hidden />}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

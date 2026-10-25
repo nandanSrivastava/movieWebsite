@@ -1,74 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getRequestUser } from '@/lib/requestAuth';
+import { canViewBooking, ticketView } from '@/lib/bookingAccess';
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const bookingId = searchParams.get('bookingId');
+    const bookingId = req.nextUrl.searchParams.get('bookingId');
+    const accessKey = req.nextUrl.searchParams.get('k');
 
     if (!bookingId) {
       return NextResponse.json({ error: 'Missing bookingId parameter' }, { status: 400 });
     }
 
     const booking = await db.getBookingById(bookingId);
+    const user = booking ? await getRequestUser(req) : null;
 
-    if (!booking) {
+    if (!booking || !canViewBooking(booking, accessKey, user)) {
       return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
     }
 
-    let userId: string | null = null;
-    let userRole = 'user';
-    const isSupabaseConfigured = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-    if (!isSupabaseConfigured) {
-      const mockSession = req.cookies.get('cinebook_mock_session');
-      if (mockSession) {
-        try {
-          const sessionObj = JSON.parse(mockSession.value);
-          userId = sessionObj.id;
-          userRole = sessionObj.role;
-        } catch {}
-      }
-    } else {
-      const { createServerClient } = await import('@supabase/ssr');
-      const { cookies } = await import('next/headers');
-      const cookieStore = await cookies();
-      const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll() {
-              return cookieStore.getAll();
-            },
-            setAll(cookiesToSet) {
-              try {
-                cookiesToSet.forEach(({ name, value, options }) =>
-                  cookieStore.set(name, value, options)
-                );
-              } catch {}
-            },
-          },
-        }
-      );
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        userId = user.id;
-        const profile = await db.getProfile(userId);
-        userRole = profile?.role || 'user';
-      }
-    }
-
-    if ((booking.booked_by && userId !== booking.booked_by) && userRole !== 'admin' && userRole !== 'member') {
-      return NextResponse.json({ payment_status: booking.payment_status });
-    }
-
-    const response = NextResponse.json(booking);
-    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-
+    const response = NextResponse.json(ticketView(booking));
+    response.headers.set('Cache-Control', 'no-store');
     return response;
-  } catch (err: any) {
+  } catch (err) {
     console.error('Booking status API error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Could not load the booking' }, { status: 500 });
   }
 }

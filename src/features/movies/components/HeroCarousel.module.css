@@ -1,0 +1,162 @@
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding-top: calc(var(--header-height) + env(safe-area-inset-top) + 16px);
+  padding-bottom: 24px;
+  isolation: isolate;
+}
+
+/* The poster, blurred and darkened: colour without a stretched, soft image */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  animation: fadeIn var(--dur-slow) var(--ease-out);
+}
+.backdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(48px) saturate(1.3);
+  transform: scale(1.3);
+  opacity: 0.55;
+}
+.backdrop::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to bottom, rgba(13, 6, 9, 0.35), rgba(13, 6, 9, 0.2) 40%, var(--bg-void) 100%);
+}
+:global(.light) .backdrop img { opacity: 0.35; }
+:global(.light) .backdrop::after {
+  background: linear-gradient(to bottom, rgba(237, 226, 206, 0.2), var(--bg-void) 100%);
+}
+
+.inner { position: relative; }
+
+.slide {
+  display: grid;
+  grid-template-columns: 38% 1fr;
+  grid-template-areas:
+    'poster copy'
+    'details details';
+  gap: 16px;
+  align-items: end;
+  animation: fadeIn var(--dur-slow) var(--ease-out);
+}
+
+.poster {
+  grid-area: poster;
+  display: block;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(246, 233, 210, 0.12);
+  background: var(--bg-elevated);
+}
+.poster img { width: 100%; height: 100%; object-fit: cover; }
+
+.copy { grid-area: copy; min-width: 0; }
+.kicker { font-size: var(--fs-sm); font-weight: 600; color: var(--accent-ink); }
+.title {
+  margin-top: 4px;
+  font-size: clamp(2.25rem, 9vw, 3rem);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.cert {
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  line-height: 18px;
+  color: var(--text-primary);
+}
+
+.details { grid-area: details; display: flex; flex-direction: column; gap: 16px; }
+
+.synopsis {
+  max-width: 60ch;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.today { display: flex; flex-direction: column; gap: 8px; }
+.todayLabel { font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); }
+.times { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+.time {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: rgba(13, 6, 9, 0.35);
+  font-weight: 700;
+  color: var(--text-primary);
+  transition: border-color var(--t-fast), background-color var(--t-fast);
+}
+:global(.light) .time { background: var(--bg-card); }
+.time:hover { border-color: var(--accent); background: var(--accent-bg); }
+
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.actions > * { flex: 1 1 160px; }
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 20px;
+}
+.control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  transition: color var(--t-fast), background-color var(--t-fast);
+}
+.control:hover { color: var(--text-primary); background: var(--bg-surface); }
+.control svg { width: 20px; height: 20px; }
+.position {
+  min-width: 44px;
+  text-align: center;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+@media (min-width: 900px) {
+  .hero { padding-top: calc(var(--header-height) + 48px); padding-bottom: 40px; }
+  .slide {
+    grid-template-columns: 1fr 300px;
+    grid-template-areas:
+      'copy poster'
+      'details poster';
+    column-gap: 64px;
+    row-gap: 20px;
+    align-items: start;
+  }
+  .copy { align-self: end; }
+  .title { font-size: var(--fs-6xl); }
+  .actions > * { flex: 0 0 auto; }
+  .controls { margin-top: 28px; }
+}

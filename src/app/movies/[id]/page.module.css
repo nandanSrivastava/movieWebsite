@@ -1,0 +1,156 @@
+.page {
+  position: relative;
+  overflow: hidden;
+  padding-bottom: 32px;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 520px;
+  z-index: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent);
+  mask-image: linear-gradient(to bottom, #000 30%, transparent);
+}
+.backdrop img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(40px) saturate(1.2);
+  opacity: 0.35;
+  transform: scale(1.2);
+}
+:global(.light) .backdrop img { opacity: 0.25; }
+
+.layout {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  grid-template-areas:
+    'back back'
+    'poster intro'
+    'showtimes showtimes'
+    'about about'
+    'trailer trailer';
+  gap: 16px 16px;
+  padding-top: 12px;
+}
+
+.back {
+  grid-area: back;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 44px;
+  margin-left: -6px;
+  padding-right: 8px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+}
+.back:hover { color: var(--text-primary); }
+.back svg { width: 20px; height: 20px; }
+
+.posterCol { grid-area: poster; }
+.poster {
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-lg);
+}
+.poster img { width: 100%; height: 100%; object-fit: cover; }
+
+.intro {
+  grid-area: intro;
+  align-self: end;
+  min-width: 0;
+}
+.title {
+  font-size: var(--fs-3xl);
+  color: var(--text-primary);
+}
+
+.meta {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin-top: 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+.cert {
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  font-weight: 700;
+  font-size: var(--fs-xs);
+  line-height: 20px;
+  color: var(--text-primary);
+}
+
+.genres {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.genres li {
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+}
+
+.sectionTitle {
+  font-size: var(--fs-xl);
+  margin-bottom: 12px;
+}
+
+.showtimes { grid-area: showtimes; margin-top: 8px; }
+.about { grid-area: about; }
+.synopsis {
+  max-width: 68ch;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+.trailer { grid-area: trailer; }
+.trailerFrame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  max-width: 820px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #000;
+  border: 1px solid var(--border-default);
+}
+
+@media (min-width: 900px) {
+  .layout {
+    grid-template-columns: 280px 1fr;
+    grid-template-areas:
+      'back back'
+      'poster intro'
+      'poster showtimes'
+      'poster about'
+      'poster trailer'
+      '. trailer';
+    grid-template-rows: auto auto auto auto 1fr;
+    gap: 24px 48px;
+    padding-top: 24px;
+  }
+  .posterCol { align-self: start; position: sticky; top: calc(var(--header-height) + 24px); }
+  .intro { align-self: start; }
+  .title { font-size: var(--fs-5xl); }
+  .showtimes { margin-top: 0; }
+}

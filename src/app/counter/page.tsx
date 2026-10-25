@@ -7,8 +7,9 @@ import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Html5Qrcode } from 'html5-qrcode';
+import { istDateString, checkInWindow } from '@/lib/istDate';
 import {
   Ticket,
   QrCode,
@@ -29,6 +30,7 @@ export default function CounterPOSPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useCineBookAuth();
   const { showToast } = useToast();
+  const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<'sales' | 'verification'>('sales');
   const [searchQuery, setSearchQuery] = useState('');
@@ -39,6 +41,9 @@ export default function CounterPOSPage() {
   const [verifying, setVerifying] = useState(false);
   const [verifiedTicket, setVerifiedTicket] = useState<any | null>(null);
   const [verificationError, setVerificationError] = useState<string | null>(null);
+  const [searchMatches, setSearchMatches] = useState<any[] | null>(null);
+  const [admitting, setAdmitting] = useState(false);
+  const [admittedId, setAdmittedId] = useState<string | null>(null);
 
   // Camera QR Scanner State
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -59,16 +64,19 @@ export default function CounterPOSPage() {
 
   const shows = showsData || [];
 
-  // Fetch recent confirmed bookings for fast gate entry lookup
-  const { data: recentBookingsData, isLoading: loadingRecentBookings } = useQuery({
+  // Fetch paid bookings for today's shows for fast gate entry lookup
+  const { data: recentBookingsData, isLoading: loadingRecentBookings, isFetching: fetchingRecentBookings, refetch: refetchRecentBookings } = useQuery({
     queryKey: ['counterRecentBookings'],
     queryFn: async () => {
       const res = await fetch('/api/counter/bookings');
-      if (!res.ok) return [];
+      if (!res.ok) throw new Error('Failed to load bookings');
       const data = await res.json();
       return data.bookings || [];
     },
     enabled: !!user && ['admin', 'member'].includes(user.role) && activeTab === 'verification',
+    // Gate list must reflect new sales and admissions, so never serve it from cache
+    staleTime: 0,
+    refetchInterval: 30 * 1000,
   });
 
   const recentBookings = recentBookingsData || [];
@@ -250,6 +258,8 @@ export default function CounterPOSPage() {
     setVerifying(true);
     setVerifiedTicket(null);
     setVerificationError(null);
+    setSearchMatches(null);
+    setAdmittedId(null);
 
     try {
       const res = await fetch(`/api/bookings/verify?token=${encodeURIComponent(tokenToVerify.trim())}`);
@@ -258,9 +268,15 @@ export default function CounterPOSPage() {
       if (!res.ok) {
         setVerificationError(data.error || 'Failed to verify ticket stub.');
         showToast(data.error || 'Ticket verification failed.', 'error');
+      } else if (data.matches) {
+        // Phone / name search: one hit opens the ticket, several need staff to pick
+        if (data.matches.length === 1) {
+          setVerifiedTicket(data.matches[0]);
+        } else {
+          setSearchMatches(data.matches);
+        }
       } else {
         setVerifiedTicket(data.booking);
-        showToast('Ticket stub verified! Entry approved.', 'success');
       }
     } catch (err) {
       console.error(err);
@@ -269,6 +285,38 @@ export default function CounterPOSPage() {
       setVerifying(false);
     }
   };
+
+  const admitTicket = async (bookingId: string) => {
+    setAdmitting(true);
+    try {
+      const res = await fetch('/api/bookings/check-in', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId }),
+      });
+      const data = await res.json();
+
+      if (data.booking) setVerifiedTicket(data.booking);
+      if (!res.ok) {
+        showToast(data.error || 'Could not admit this ticket.', 'error');
+      } else {
+        setAdmittedId(bookingId);
+        showToast('Entry approved. Ticket marked as used.', 'success');
+      }
+      queryClient.invalidateQueries({ queryKey: ['counterRecentBookings'] });
+    } catch (err) {
+      console.error(err);
+      showToast('Network error admitting ticket.', 'error');
+    } finally {
+      setAdmitting(false);
+    }
+  };
+
+  const formatSeats = (booking: any) =>
+    booking.booking_seats?.map((bs: any) => `${bs.seat_layout?.row_label}-${bs.seat_layout?.seat_number}`).join(', ');
+
+  const formatAdmittedAt = (iso: string) =>
+    new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 
   // Helper date/time formatters
   const formatTimeLabel = (timeStr: string) => {
@@ -302,8 +350,9 @@ export default function CounterPOSPage() {
     }
   };
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const tomorrowStr = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  // Show dates are India dates; the browser's UTC date is wrong before 05:30 IST
+  const todayStr = istDateString();
+  const tomorrowStr = istDateString(new Date(Date.now() + 86400000));
 
   // Filter shows based on date, time, search
   const filteredShows = useMemo(() => {
@@ -352,7 +401,23 @@ export default function CounterPOSPage() {
     setTokenInput('');
     setVerifiedTicket(null);
     setVerificationError(null);
+    setSearchMatches(null);
+    setAdmittedId(null);
   };
+
+  // Gate state of the ticket on screen: admit only valid, unused tickets for today's shows
+  const todayIst = istDateString();
+  const entryWindow = verifiedTicket?.show ? checkInWindow(verifiedTicket.show.show_date, verifiedTicket.show.show_time) : 'closed';
+  const ticketState: 'admitted' | 'used' | 'wrong-day' | 'ready' | null = !verifiedTicket
+    ? null
+    : verifiedTicket.id === admittedId
+      ? 'admitted'
+      : verifiedTicket.checked_in_at
+        ? 'used'
+        : entryWindow !== 'open'
+          ? 'wrong-day'
+          : 'ready';
+  const ticketTone = ticketState === 'used' || ticketState === 'wrong-day' ? '#EF4444' : '#10B981';
 
   if (authLoading || !user || !['admin', 'member'].includes(user.role)) {
     return (
@@ -800,7 +865,7 @@ export default function CounterPOSPage() {
                   <div className="flex flex-col sm:flex-row gap-2" style={{ display: 'flex', gap: '10px' }}>
                     <input
                       type="text"
-                      placeholder="Enter Customer Phone, Name, or last 4-6 chars of Ticket..."
+                      placeholder="Enter customer phone, name, or booking ID..."
                       value={tokenInput}
                       onChange={(e) => setTokenInput(e.target.value)}
                       disabled={verifying}
@@ -828,30 +893,71 @@ export default function CounterPOSPage() {
                   </div>
 
                   <div className="mt-2 rounded-lg bg-amber-400/10 p-2.5 border border-amber-400/20 text-[11px] text-amber-300" style={{ marginTop: '8px', padding: '8px 10px', borderRadius: '8px', backgroundColor: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.2)', fontSize: '0.74rem', color: '#FCD34D' }}>
-                    💡 <strong>No need to type full long token!</strong> You can now type:
+                    💡 <strong>No QR code?</strong> You can search by:
                     <div className="mt-1 flex flex-wrap gap-2 text-[10px]" style={{ marginTop: '4px', display: 'flex', gap: '8px', flexWrap: 'wrap', fontSize: '0.7rem' }}>
-                      <span className="rounded bg-slate-900 px-1.5 py-0.5 border border-amber-400/30 text-white" style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#090D16', color: '#FFFFFF' }}>📱 Phone Number (e.g. 9876543210)</span>
-                      <span className="rounded bg-slate-900 px-1.5 py-0.5 border border-amber-400/30 text-white" style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#090D16', color: '#FFFFFF' }}>👤 Customer Name (e.g. Rajesh)</span>
-                      <span className="rounded bg-slate-900 px-1.5 py-0.5 border border-amber-400/30 text-white" style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#090D16', color: '#FFFFFF' }}>🔢 Last 4-6 chars of Ticket ID</span>
+                      <span className="rounded bg-slate-900 px-1.5 py-0.5 border border-amber-400/30 text-white" style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#090D16', color: '#FFFFFF' }}>📱 Phone, 4+ digits (e.g. 43210)</span>
+                      <span className="rounded bg-slate-900 px-1.5 py-0.5 border border-amber-400/30 text-white" style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#090D16', color: '#FFFFFF' }}>👤 Customer Name, 3+ letters</span>
+                      <span className="rounded bg-slate-900 px-1.5 py-0.5 border border-amber-400/30 text-white" style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#090D16', color: '#FFFFFF' }}>🔢 Full Booking ID from the ticket</span>
                     </div>
                   </div>
                 </form>
 
-                {/* VERIFICATION SUCCESS */}
-                {verifiedTicket && (
-                  <div className="rounded-xl border-2 border-emerald-500 bg-emerald-500/10 p-4 text-white animate-in fade-in duration-200" style={{ padding: '16px', borderRadius: '12px', backgroundColor: 'rgba(16,185,129,0.08)', border: '2px solid #10B981', color: '#FFFFFF' }}>
+                {/* SEARCH MATCHES: several paid tickets fit the phone / name, staff picks one */}
+                {searchMatches && (
+                  <div className="rounded-xl border border-amber-400/40 bg-amber-400/5 p-3 animate-in fade-in duration-200" style={{ padding: '12px', borderRadius: '12px', border: '1px solid rgba(245,158,11,0.4)', backgroundColor: 'rgba(245,158,11,0.05)', marginBottom: '16px' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#F59E0B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
+                      {searchMatches.length} tickets match. Pick the customer at the gate:
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {searchMatches.map((m: any) => (
+                        <button
+                          key={m.id}
+                          onClick={() => { setSearchMatches(null); setVerifiedTicket(m); }}
+                          className="text-left rounded-lg border border-slate-800 bg-slate-950/70 hover:border-amber-400/50 transition-colors"
+                          style={{ textAlign: 'left', backgroundColor: '#090D16', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', padding: '10px 12px', cursor: 'pointer', color: '#FFFFFF' }}
+                        >
+                          <div style={{ fontWeight: 700, fontSize: '0.82rem' }}>
+                            {m.customer_name || 'Customer'} <span style={{ color: '#9CA3AF', fontWeight: 500 }}>· 📱 {m.customer_phone || 'No phone'}</span>
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: '#9CA3AF', marginTop: '2px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <span>🎬 {m.show?.movie?.title || 'Movie'}</span>
+                            <span style={{ color: m.show?.show_date === todayIst ? '#F59E0B' : '#9CA3AF' }}>
+                              🗓 {m.show?.show_date === todayIst ? 'Today' : formatDateLabel(m.show?.show_date)} {m.show?.show_time ? formatTimeLabel(m.show.show_time) : ''}
+                            </span>
+                            <span style={{ color: '#EF4444' }}>💺 {formatSeats(m) || 'No seats'}</span>
+                            {m.checked_in_at && <span style={{ color: '#EF4444', fontWeight: 700 }}>Already used</span>}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* VERIFIED TICKET */}
+                {verifiedTicket && ticketState && (
+                  <div className="rounded-xl border-2 p-4 text-white animate-in fade-in duration-200" style={{ padding: '16px', borderRadius: '12px', backgroundColor: ticketTone === '#10B981' ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)', border: `2px solid ${ticketTone}`, color: '#FFFFFF' }}>
                     <div className="mb-3 flex items-center justify-between" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                       <div className="flex items-center gap-2" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <CheckCircle2 className="h-5 w-5 text-emerald-400" style={{ color: '#10B981' }} />
+                        {ticketTone === '#10B981'
+                          ? <CheckCircle2 className="h-5 w-5" style={{ color: ticketTone }} />
+                          : <XCircle className="h-5 w-5" style={{ color: ticketTone }} />}
                         <div>
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400" style={{ fontSize: '0.65rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#10B981' }}>
-                            ENTRY APPROVED
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider" style={{ fontSize: '0.65rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: ticketTone }}>
+                            {ticketState === 'admitted' && `ENTRY APPROVED · ${formatAdmittedAt(verifiedTicket.checked_in_at)}`}
+                            {ticketState === 'used' && `ENTRY DENIED · USED AT ${formatAdmittedAt(verifiedTicket.checked_in_at)}`}
+                            {ticketState === 'wrong-day' && 'ENTRY DENIED'}
+                            {ticketState === 'ready' && 'PAID · NOT YET USED'}
                           </span>
-                          <h3 className="text-sm font-extrabold text-white" style={{ fontSize: '1rem', fontWeight: 800, margin: 0 }}>VALID TICKET</h3>
+                          <h3 className="text-sm font-extrabold text-white" style={{ fontSize: '1rem', fontWeight: 800, margin: 0 }}>
+                            {ticketState === 'admitted' && 'ADMITTED'}
+                            {ticketState === 'used' && 'TICKET ALREADY USED'}
+                            {ticketState === 'wrong-day' && (entryWindow === 'too_early' ? 'TOO EARLY FOR THIS SHOW' : 'SHOW HAS ENDED')}
+                            {ticketState === 'ready' && 'VALID TICKET'}
+                          </h3>
                         </div>
                       </div>
 
-                      <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[10px] font-bold text-emerald-400 border border-emerald-500/30" style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'rgba(16,185,129,0.2)', color: '#10B981' }}>
+                      <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold" style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '0.68rem', fontWeight: 700, backgroundColor: 'rgba(255,255,255,0.08)', color: '#D1D5DB' }}>
                         {verifiedTicket.booking_channel?.toUpperCase()} POS
                       </span>
                     </div>
@@ -871,7 +977,7 @@ export default function CounterPOSPage() {
                       <div>
                         <span className="text-[10px] text-slate-400 block" style={{ fontSize: '0.68rem', color: '#9CA3AF', display: 'block' }}>SEATS</span>
                         <strong className="text-rose-400 text-xs" style={{ color: '#EF4444', fontSize: '0.92rem' }}>
-                          {verifiedTicket.booking_seats?.map((bs: any) => `${bs.seat_layout?.row_label}-${bs.seat_layout?.seat_number}`).join(', ') || 'Confirmed'}
+                          {formatSeats(verifiedTicket) || 'No seats on record'}
                         </strong>
                       </div>
                       <div>
@@ -880,10 +986,22 @@ export default function CounterPOSPage() {
                       </div>
                     </div>
 
+                    {ticketState === 'ready' && (
+                      <button
+                        onClick={() => admitTicket(verifiedTicket.id)}
+                        disabled={admitting}
+                        className="w-full rounded-lg py-2.5 text-sm font-extrabold text-slate-950 active:scale-[0.98] transition-all disabled:opacity-50"
+                        style={{ width: '100%', borderRadius: '8px', padding: '11px', fontSize: '0.9rem', fontWeight: 800, border: 'none', backgroundColor: '#10B981', color: '#000000', cursor: 'pointer', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      >
+                        {admitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                        {admitting ? 'Admitting...' : 'Admit Entry'}
+                      </button>
+                    )}
+
                     <button
                       onClick={handleClearVerification}
-                      className="w-full rounded-lg border border-emerald-500/40 bg-slate-900/80 py-2 text-xs font-bold text-white hover:bg-slate-800 transition-colors"
-                      style={{ width: '100%', borderRadius: '6px', padding: '8px', fontSize: '0.8rem', border: '1px solid rgba(16,185,129,0.4)', backgroundColor: '#111726', color: '#FFFFFF', cursor: 'pointer' }}
+                      className="w-full rounded-lg bg-slate-900/80 py-2 text-xs font-bold text-white hover:bg-slate-800 transition-colors"
+                      style={{ width: '100%', borderRadius: '6px', padding: '8px', fontSize: '0.8rem', border: `1px solid ${ticketTone}66`, backgroundColor: '#111726', color: '#FFFFFF', cursor: 'pointer' }}
                     >
                       Clear & Scan Next Ticket
                     </button>
@@ -922,12 +1040,20 @@ export default function CounterPOSPage() {
                   <div className="mb-3 flex items-center justify-between" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                     <div>
                       <h3 className="text-xs font-extrabold uppercase tracking-wider text-amber-400" style={{ fontSize: '0.75rem', fontWeight: 800, color: '#F59E0B', margin: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        📋 Today&apos;s Active Bookings (Quick Check)
+                        📋 Today&apos;s Shows: Paid Tickets
                       </h3>
                       <p className="text-[11px] text-slate-400 mt-0.5" style={{ fontSize: '0.72rem', color: '#9CA3AF', margin: '2px 0 0 0' }}>
-                        Tap any customer ticket to verify instantly without typing
+                        Tap a customer to open their ticket without typing
                       </p>
                     </div>
+                    <button
+                      onClick={() => refetchRecentBookings()}
+                      className="rounded-full p-1.5 hover:bg-slate-800 transition-colors"
+                      title="Refresh list"
+                      style={{ padding: '6px', borderRadius: '50%', border: 'none', backgroundColor: 'transparent', cursor: 'pointer' }}
+                    >
+                      <RefreshCw className={fetchingRecentBookings ? 'animate-spin' : ''} style={{ width: '14px', height: '14px', color: '#F59E0B' }} />
+                    </button>
                   </div>
 
                   {loadingRecentBookings ? (
@@ -937,11 +1063,11 @@ export default function CounterPOSPage() {
                     </div>
                   ) : recentBookings.length === 0 ? (
                     <div className="rounded-lg bg-slate-950/40 p-3 text-center text-xs text-slate-500" style={{ padding: '12px', textAlign: 'center', fontSize: '0.78rem', color: '#6B7280', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
-                      No recent confirmed bookings found.
+                      No paid tickets for today&apos;s shows yet.
                     </div>
                   ) : (
                     <div className="space-y-2 max-h-64 overflow-y-auto pr-1" style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {recentBookings.slice(0, 15).map((b: any) => {
+                      {recentBookings.map((b: any) => {
                         const tokenShort = b.qr_code_token ? (b.qr_code_token.split('_').pop() || b.qr_code_token.slice(-6)) : b.id.slice(-6);
                         return (
                           <div
@@ -961,21 +1087,32 @@ export default function CounterPOSPage() {
                               <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap gap-2" style={{ fontSize: '0.72rem', color: '#9CA3AF', marginTop: '2px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                 <span>📱 {b.customer_phone || 'No phone'}</span>
                                 <span>🎬 {b.show?.movie?.title || 'Movie'}</span>
-                                <span className="text-rose-400 font-medium">💺 {b.booking_seats?.map((bs: any) => `${bs.seat_layout?.row_label}-${bs.seat_layout?.seat_number}`).join(', ') || 'Seats'}</span>
+                                <span>🕒 {b.show?.show_time ? formatTimeLabel(b.show.show_time) : ''}</span>
+                                <span className="text-rose-400 font-medium">💺 {formatSeats(b) || 'No seats'}</span>
                               </div>
                             </div>
 
-                            <button
-                              onClick={() => {
-                                const targetToken = b.qr_code_token || b.id;
-                                setTokenInput(targetToken);
-                                verifyTokenDirectly(targetToken);
-                              }}
-                              className="rounded-lg bg-amber-400 hover:bg-amber-300 px-3 py-1.5 text-xs font-bold text-slate-950 transition-all flex-shrink-0 active:scale-95"
-                              style={{ padding: '6px 12px', fontSize: '0.75rem', fontWeight: 700, borderRadius: '6px', backgroundColor: '#F59E0B', color: '#000000', cursor: 'pointer', border: 'none', flexShrink: 0 }}
-                            >
-                              Verify
-                            </button>
+                            {b.checked_in_at ? (
+                              <span
+                                className="flex-shrink-0 text-[11px] font-bold"
+                                style={{ flexShrink: 0, fontSize: '0.72rem', fontWeight: 700, color: '#10B981', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                <CheckCircle2 style={{ width: '14px', height: '14px' }} />
+                                In · {formatAdmittedAt(b.checked_in_at)}
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => {
+                                  const targetToken = b.qr_code_token || b.id;
+                                  setTokenInput(targetToken);
+                                  verifyTokenDirectly(targetToken);
+                                }}
+                                className="rounded-lg bg-amber-400 hover:bg-amber-300 px-3 py-1.5 text-xs font-bold text-slate-950 transition-all flex-shrink-0 active:scale-95"
+                                style={{ padding: '6px 12px', fontSize: '0.75rem', fontWeight: 700, borderRadius: '6px', backgroundColor: '#F59E0B', color: '#000000', cursor: 'pointer', border: 'none', flexShrink: 0 }}
+                              >
+                                Open
+                              </button>
+                            )}
                           </div>
                         );
                       })}

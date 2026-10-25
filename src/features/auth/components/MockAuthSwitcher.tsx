@@ -27,12 +27,13 @@ export default function MockAuthSwitcher() {
   ];
 
   return (
+    // Dev only. Sits under the header so it never covers the booking bar or tab bar.
     <div style={{
       position: 'fixed',
-      bottom: '24px',
-      left: '24px',
+      top: 'calc(var(--header-height) + env(safe-area-inset-top) + 8px)',
+      left: '8px',
       zIndex: 99999,
-      fontFamily: "'Outfit', sans-serif"
+      fontFamily: 'var(--font-body)'
     }}>
       {/* Trigger Button */}
       <button
@@ -41,15 +42,16 @@ export default function MockAuthSwitcher() {
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
-          padding: '10px 16px',
+          padding: '6px 12px',
           backgroundColor: '#1A1A22',
           border: '1px solid #25252E',
           borderRadius: '30px',
           boxShadow: '0 8px 16px rgba(0, 0, 0, 0.6)',
           color: '#FFFFFF',
-          fontSize: '0.85rem',
+          fontSize: '0.75rem',
           fontWeight: 600,
           cursor: 'pointer',
+          opacity: 0.85,
           transition: 'all 0.2s ease',
         }}
       >
@@ -68,7 +70,7 @@ export default function MockAuthSwitcher() {
       {isOpen && (
         <div style={{
           position: 'absolute',
-          bottom: '50px',
+          top: '40px',
           left: '0',
           backgroundColor: '#16161E',
           border: '1px solid #25252E',

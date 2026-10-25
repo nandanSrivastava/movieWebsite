@@ -1,6 +1,17 @@
 import 'server-only';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Movie, Screen, SeatLayout, Show, SeatStatus, Booking, Profile, AuditLog, DatabaseClient } from './types';
+import {
+  Movie, Screen, Show, SeatStatus, Booking, Profile, AuditLog, DatabaseClient,
+  LockResult, FinalizeResult, SeatAvailability, SeatHold, ActiveLock, SalesSummary, PendingBookingResult
+} from './types';
+
+const BOOKING_FULL_SELECT =
+  '*, show:shows(*, movie:movies(*), screen:screens(*)), booking_seats(seat_layout_id, price, seat_layout:seat_layout(*))';
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Escapes LIKE wildcards so customer input is matched literally
+const escapeLike = (value: string) => value.replace(/[\\%_]/g, (c) => `\\${c}`);
 
 // ── SUPABASE CLIENT DB IMPLEMENTATION ──────────────────────────
 export class SupabaseDatabaseClient implements DatabaseClient {
@@ -8,10 +19,14 @@ export class SupabaseDatabaseClient implements DatabaseClient {
   private supabase: SupabaseClient;
 
   constructor() {
-    // Uses service role or anon key based on environment
+    // Server-side access needs the service role: the seat and payment
+    // functions are not callable with the public anon key.
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    this.supabase = createClient(url, key);
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!key) {
+      throw new Error('SUPABASE_SERVICE_ROLE_KEY is not set. The server cannot reach the database without it.');
+    }
+    this.supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
   }
 
   private async fetchWithRetry<T>(queryFn: () => any, retries = 2): Promise<T> {
@@ -72,7 +87,7 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     const layouts: any[] = [];
     const rowLabels = Array.from({ length: rows }, (_, i) => String.fromCharCode(65 + i));
     rowLabels.forEach((row) => {
-      let category = 'normal';
+      let category = 'classic';
       if (row >= 'E') category = 'premium';
       for (let num = 1; num <= seatsPerRow; num++) {
         layouts.push({
@@ -90,10 +105,12 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     return screen;
   }
 
-  public async getShows(): Promise<Show[]> {
-    return this.fetchWithRetry(() => 
-      this.supabase.from('shows').select('*, movie:movies(*), screen:screens(*)')
-    );
+  public async getShows(fromDate?: string): Promise<Show[]> {
+    return this.fetchWithRetry(() => {
+      let query = this.supabase.from('shows').select('*, movie:movies(*), screen:screens(*)');
+      if (fromDate) query = query.gte('show_date', fromDate);
+      return query.order('show_date').order('show_time').limit(1000);
+    });
   }
 
   public async getShowsForDate(date: string): Promise<Show[]> {
@@ -149,179 +166,168 @@ export class SupabaseDatabaseClient implements DatabaseClient {
   }
 
   public async getSeatsForShow(showId: string): Promise<SeatStatus[]> {
-    const data = await this.fetchWithRetry(() => 
-      this.supabase
-        .from('seat_status')
-        .select('*, seat_layout:seat_layout(*)')
-        .eq('show_id', showId)
-    );
-    
+    if (!UUID_RE.test(showId)) return [];
+    const { data, error } = await this.supabase
+      .from('seat_status')
+      .select('*, seat_layout:seat_layout(*)')
+      .eq('show_id', showId);
+    if (error) throw error;
+
     const now = new Date().toISOString();
     return (data as SeatStatus[]).map(seat => {
       if (seat.status === 'locked' && seat.lock_expires_at && seat.lock_expires_at < now) {
-        return {
-          ...seat,
-          status: 'available',
-          locked_by: null,
-          locked_at: null,
-          lock_expires_at: null
-        };
+        return { ...seat, status: 'available', locked_by: null, locked_at: null, lock_expires_at: null };
       }
       return seat;
     });
   }
 
-  public async lockSeats(showId: string, seatLayoutIds: string[], userId: string, holdSeconds = 360): Promise<boolean> {
+  public async getSeatAvailability(showId: string): Promise<SeatAvailability[]> {
+    if (!UUID_RE.test(showId)) return [];
+    // Hot path (polled by every open seat map): one query, no retries
+    const { data, error } = await this.supabase
+      .from('seat_status')
+      .select('seat_layout_id, status, lock_expires_at')
+      .eq('show_id', showId);
+    if (error) throw error;
+
+    const now = new Date().toISOString();
+    return (data || []).map((seat: any) => ({
+      seat_layout_id: seat.seat_layout_id,
+      status: seat.status === 'locked' && (!seat.lock_expires_at || seat.lock_expires_at < now) ? 'available' : seat.status,
+    }));
+  }
+
+  public async getSeatHolds(showId: string, owner: string): Promise<SeatHold[]> {
+    if (!UUID_RE.test(showId) || !UUID_RE.test(owner)) return [];
+    const { data, error } = await this.supabase
+      .from('seat_status')
+      .select('seat_layout_id, lock_expires_at')
+      .eq('show_id', showId)
+      .eq('locked_by', owner)
+      .eq('status', 'locked')
+      .gt('lock_expires_at', new Date().toISOString());
+    if (error) throw error;
+    return data as SeatHold[];
+  }
+
+  public async lockSeats(showId: string, seatLayoutIds: string[], owner: string, clientIp: string | null): Promise<LockResult> {
+    if (!UUID_RE.test(showId) || !UUID_RE.test(owner) || !seatLayoutIds.every(id => UUID_RE.test(id))) return 'invalid';
     const { data, error } = await this.supabase.rpc('lock_seats', {
       p_show_id: showId,
       p_seat_layout_ids: seatLayoutIds,
-      p_user_id: userId,
-      p_ui_hold_seconds: holdSeconds
+      p_owner: owner,
+      p_client_ip: clientIp,
     });
     if (error) throw error;
-    return data;
+    return data as LockResult;
   }
 
-  public async unlockSeats(showId: string, seatLayoutIds: string[], userId: string, force = false): Promise<boolean> {
-    let query = this.supabase
-      .from('seat_status')
-      .update({ status: 'available', locked_by: null, locked_at: null, lock_expires_at: null })
-      .eq('show_id', showId)
-      .in('seat_layout_id', seatLayoutIds);
-
-    if (!force) {
-      query = query.eq('locked_by', userId);
-    }
-
-    const { error } = await query;
-    return !error;
-  }
-
-  public async createBooking(
-    showId: string,
-    seatLayoutIds: string[],
-    userId: string | null,
-    channel: 'online' | 'counter',
-    customerDetails: { name?: string; phone?: string; email?: string; idempotencyKey?: string }
-  ): Promise<Booking> {
-    // 1. Double check client idempotency
-    if (customerDetails.idempotencyKey) {
-      const { data: existing } = await this.supabase
-        .from('bookings')
-        .select('*')
-        .eq('client_idempotency_key', customerDetails.idempotencyKey)
-        .maybeSingle();
-
-      if (existing) return existing;
-    }
-
-    // 2. Fetch prices
-    const { data: show } = await this.supabase.from('shows').select('*').eq('id', showId).single();
-    const { data: layouts } = await this.supabase.from('seat_layout').select('*').in('id', seatLayoutIds);
-
-    if (!show || !layouts) throw new Error('Show or seat layouts not found');
-
-    let total = 0;
-    const items = layouts.map((layout) => {
-      const price = {
-        classic: (show as any).price_classic ?? show.price_normal ?? 150,
-        premium: show.price_premium
-      }[layout.category as 'classic' | 'premium'] ?? (show as any).price_classic ?? 150;
-      total += Number(price);
-      return { seat_layout_id: layout.id, price: Number(price) };
-    });
-
-    // 3. Create booking row
-    const razorpayOrderId = channel === 'online' ? `order_placeholder_${Math.random().toString(36).slice(2)}` : null;
-
-    const { data: booking, error: bookingErr } = await this.supabase.from('bookings').insert({
-      show_id: showId,
-      booked_by: userId,
-      booking_channel: channel,
-      customer_name: customerDetails.name || null,
-      customer_phone: customerDetails.phone || null,
-      customer_email: customerDetails.email || null,
-      total_amount: total,
-      payment_status: 'pending',
-      razorpay_order_id: razorpayOrderId,
-      client_idempotency_key: customerDetails.idempotencyKey || null
-    }).select().single();
-
-    if (bookingErr) throw bookingErr;
-
-    // 4. Create booking seats
-    const seatRows = items.map(item => ({
-      booking_id: booking.id,
-      seat_layout_id: item.seat_layout_id,
-      price: item.price
-    }));
-
-    const { error: seatErr } = await this.supabase.from('booking_seats').insert(seatRows);
-    if (seatErr) throw seatErr;
-
-    return booking;
-  }
-
-  public async confirmBooking(bookingId: string, showId: string, seatLayoutIds: string[], userId: string | null): Promise<boolean> {
-    const { data, error } = await this.supabase.rpc('confirm_booking', {
-      p_booking_id: bookingId,
+  public async extendSeatHolds(showId: string, seatLayoutIds: string[], owner: string, seconds: number): Promise<string | null> {
+    if (!UUID_RE.test(showId) || !UUID_RE.test(owner) || !seatLayoutIds.every(id => UUID_RE.test(id))) return null;
+    const { data, error } = await this.supabase.rpc('extend_seat_holds', {
       p_show_id: showId,
       p_seat_layout_ids: seatLayoutIds,
-      p_user_id: userId
+      p_owner: owner,
+      p_seconds: seconds,
     });
     if (error) throw error;
     return data;
   }
 
-  public async finalizeBooking(bookingId: string, paymentId: string, qrToken: string): Promise<Booking> {
-    // Idempotent: only a booking still 'pending' may be finalized. If the webhook
-    // and the verify-payment fallback race each other, the FIRST finalize wins
-    // and the QR token stays stable — a second call just returns the paid booking.
-    const { data, error } = await this.supabase
-      .from('bookings')
-      .update({
-        payment_status: 'paid',
-        razorpay_payment_id: paymentId,
-        qr_code_token: qrToken
-      })
-      .eq('id', bookingId)
-      .eq('payment_status', 'pending')
-      .select()
-      .maybeSingle();
-
+  public async releaseSeatHolds(showId: string, seatLayoutIds: string[], owner: string): Promise<void> {
+    if (!UUID_RE.test(showId) || !UUID_RE.test(owner)) return;
+    const { error } = await this.supabase
+      .from('seat_status')
+      .update({ status: 'available', locked_by: null, locked_ip: null, locked_at: null, lock_expires_at: null })
+      .eq('show_id', showId)
+      .in('seat_layout_id', seatLayoutIds)
+      .eq('locked_by', owner)
+      .eq('status', 'locked');
     if (error) throw error;
-
-    if (data) return data;
-
-    // No pending row was updated — fetch the current state. If it's already
-    // paid, another path finalized it first; return it unchanged (idempotent).
-    const { data: current } = await this.supabase
-      .from('bookings')
-      .select('*')
-      .eq('id', bookingId)
-      .maybeSingle();
-
-    if (current?.payment_status === 'paid') return current;
-
-    throw new Error('Booking could not be finalized');
   }
 
-  public async updateBookingStatus(bookingId: string, status: Booking['payment_status']): Promise<Booking> {
-    const { data, error } = await this.supabase
-      .from('bookings')
-      .update({ payment_status: status })
-      .eq('id', bookingId)
-      .select()
-      .single();
-    
+  public async forceReleaseSeatHolds(showId: string, seatLayoutIds: string[]): Promise<void> {
+    if (!UUID_RE.test(showId)) return;
+    // Only ever releases holds; a booked (sold) seat is never touched
+    const { error } = await this.supabase
+      .from('seat_status')
+      .update({ status: 'available', locked_by: null, locked_ip: null, locked_at: null, lock_expires_at: null })
+      .eq('show_id', showId)
+      .in('seat_layout_id', seatLayoutIds)
+      .eq('status', 'locked');
     if (error) throw error;
-    return data;
+  }
+
+  public async getActiveLocks(): Promise<ActiveLock[]> {
+    const { data, error } = await this.supabase
+      .from('seat_status')
+      .select('show_id, seat_layout_id, locked_by, lock_expires_at, seat_layout:seat_layout(row_label, seat_number), show:shows(show_date, show_time, movie:movies(title), screen:screens(name))')
+      .eq('status', 'locked')
+      .gt('lock_expires_at', new Date().toISOString())
+      .order('lock_expires_at')
+      .limit(500);
+    if (error) throw error;
+
+    return (data || []).map((row: any) => ({
+      showId: row.show_id,
+      seatLayoutId: row.seat_layout_id,
+      seatLabel: `${row.seat_layout?.row_label}-${row.seat_layout?.seat_number}`,
+      lockedBy: row.locked_by,
+      expiresAt: row.lock_expires_at,
+      movieTitle: row.show?.movie?.title || 'Unknown Movie',
+      screenName: row.show?.screen?.name || 'Standard Screen',
+      showDate: row.show?.show_date,
+      showTime: row.show?.show_time,
+    }));
+  }
+
+  public async getShowOccupancy(showIds: string[]): Promise<Record<string, { total: number; booked: number }>> {
+    const ids = showIds.filter(id => UUID_RE.test(id));
+    if (ids.length === 0) return {};
+    const { data, error } = await this.supabase.rpc('show_occupancy', { p_show_ids: ids });
+    if (error) throw error;
+
+    const result: Record<string, { total: number; booked: number }> = {};
+    for (const row of data || []) {
+      result[row.show_id] = { total: Number(row.total_seats), booked: Number(row.booked_seats) };
+    }
+    return result;
+  }
+
+  public async createPendingBooking(params: Parameters<DatabaseClient['createPendingBooking']>[0]): Promise<PendingBookingResult> {
+    const { showId, seatLayoutIds, userId, holdOwner, channel, name, phone, email, idempotencyKey, holdSeconds } = params;
+    if (!UUID_RE.test(showId) || !UUID_RE.test(holdOwner) || !seatLayoutIds.every(id => UUID_RE.test(id))) {
+      return { status: 'invalid', booking: null, holdExpiresAt: null };
+    }
+    const { data, error } = await this.supabase.rpc('create_pending_booking', {
+      p_show_id: showId,
+      p_seat_layout_ids: seatLayoutIds,
+      p_user_id: userId,
+      p_hold_owner: holdOwner,
+      p_channel: channel,
+      p_name: name,
+      p_phone: phone,
+      p_email: email,
+      p_idempotency_key: idempotencyKey,
+      p_hold_seconds: holdSeconds,
+    });
+    if (error) throw error;
+    return { status: data.status, booking: data.booking ?? null, holdExpiresAt: data.hold_expires_at ?? null };
+  }
+
+  public async setBookingOrderId(bookingId: string, orderId: string): Promise<void> {
+    const { error } = await this.supabase.from('bookings').update({ razorpay_order_id: orderId }).eq('id', bookingId);
+    if (error) throw error;
   }
 
   public async getBookingById(id: string): Promise<Booking | null> {
+    // bookings.id is a UUID column; anything else would fail the cast in Postgres
+    if (!UUID_RE.test(id)) return null;
+
     const { data, error } = await this.supabase
       .from('bookings')
-      .select('*, show:shows(*, movie:movies(*), screen:screens(*)), booking_seats(seat_layout_id, price, seat_layout:seat_layout(*))')
+      .select(BOOKING_FULL_SELECT)
       .eq('id', id)
       .maybeSingle();
 
@@ -329,14 +335,276 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     return data;
   }
 
-  public async getBookings(): Promise<Booking[]> {
+  public async getBookingByOrderId(orderId: string): Promise<Booking | null> {
     const { data, error } = await this.supabase
       .from('bookings')
-      .select('*, show:shows(*, movie:movies(*), screen:screens(*))')
-      .order('created_at', { ascending: false });
+      .select(BOOKING_FULL_SELECT)
+      .eq('razorpay_order_id', orderId)
+      .maybeSingle();
 
     if (error) throw error;
     return data;
+  }
+
+  public async findPaidBookingsByPhone(phoneDigits: string, limit: number): Promise<Booking[]> {
+    // Stored numbers may carry a 91 / 0 prefix; customer_phone_last10 (indexed)
+    // holds the subscriber number
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .select(BOOKING_FULL_SELECT)
+      .eq('payment_status', 'paid')
+      .eq('customer_phone_last10', phoneDigits.slice(-10))
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return data;
+  }
+
+  public async finalizePayment(
+    bookingId: string,
+    paymentId: string,
+    qrToken: string,
+    conflictStatus: 'refund_pending' | 'failed'
+  ): Promise<FinalizeResult> {
+    if (!UUID_RE.test(bookingId)) return 'not_found';
+    const { data, error } = await this.supabase.rpc('finalize_payment', {
+      p_booking_id: bookingId,
+      p_payment_id: paymentId,
+      p_qr_token: qrToken,
+      p_conflict_status: conflictStatus,
+    });
+    if (error) throw error;
+    return data as FinalizeResult;
+  }
+
+  public async expirePendingBooking(bookingId: string): Promise<boolean> {
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .update({ payment_status: 'failed' })
+      .eq('id', bookingId)
+      .eq('payment_status', 'pending')
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
+  }
+
+  public async queueRefund(bookingId: string, paymentId: string, reason: string): Promise<boolean> {
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .update({ payment_status: 'refund_pending', razorpay_payment_id: paymentId, refund_reason: reason })
+      .eq('id', bookingId)
+      .in('payment_status', ['pending', 'failed'])
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
+  }
+
+  public async claimRefund(bookingId: string): Promise<Booking | null> {
+    // A short claim stops the webhook, the browser fallback and the cron job
+    // from refunding the same payment at the same moment.
+    const now = new Date();
+    const { data: current, error: readErr } = await this.supabase
+      .from('bookings')
+      .select('refund_attempts')
+      .eq('id', bookingId)
+      .maybeSingle();
+    if (readErr) throw readErr;
+    if (!current) return null;
+
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .update({
+        refund_locked_until: new Date(now.getTime() + 2 * 60 * 1000).toISOString(),
+        refund_attempts: (current.refund_attempts || 0) + 1,
+      })
+      .eq('id', bookingId)
+      .eq('payment_status', 'refund_pending')
+      .or(`refund_locked_until.is.null,refund_locked_until.lt."${now.toISOString()}"`)
+      .select('*')
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  }
+
+  public async completeRefund(bookingId: string, refundId: string | null): Promise<void> {
+    const { error } = await this.supabase
+      .from('bookings')
+      .update({ payment_status: 'refunded', razorpay_refund_id: refundId, refunded_at: new Date().toISOString() })
+      .eq('id', bookingId)
+      .eq('payment_status', 'refund_pending');
+    if (error) throw error;
+  }
+
+  public async getPendingOnlineBookings(olderThanSeconds: number, limit: number): Promise<Booking[]> {
+    const cutoff = new Date(Date.now() - olderThanSeconds * 1000).toISOString();
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .select('*')
+      .eq('payment_status', 'pending')
+      .eq('booking_channel', 'online')
+      .lt('created_at', cutoff)
+      .order('created_at')
+      .limit(limit);
+    if (error) throw error;
+    return data;
+  }
+
+  public async getRefundPendingBookings(limit: number): Promise<Booking[]> {
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .select('*')
+      .eq('payment_status', 'refund_pending')
+      .order('created_at')
+      .limit(limit);
+    if (error) throw error;
+    return data;
+  }
+
+  public async hasProcessedWebhookEvent(eventId: string): Promise<boolean> {
+    const { data, error } = await this.supabase
+      .from('processed_webhook_events')
+      .select('razorpay_event_id')
+      .eq('razorpay_event_id', eventId)
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
+  }
+
+  public async recordWebhookEvent(eventId: string): Promise<void> {
+    const { error } = await this.supabase
+      .from('processed_webhook_events')
+      .upsert({ razorpay_event_id: eventId }, { onConflict: 'razorpay_event_id', ignoreDuplicates: true });
+    if (error) throw error;
+  }
+
+  public async claimTicketEmail(bookingId: string): Promise<boolean> {
+    const now = new Date();
+    const { data: current, error: readErr } = await this.supabase
+      .from('bookings')
+      .select('ticket_email_attempts')
+      .eq('id', bookingId)
+      .maybeSingle();
+    if (readErr) throw readErr;
+    if (!current || current.ticket_email_attempts >= 5) return false;
+
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .update({
+        ticket_email_locked_until: new Date(now.getTime() + 2 * 60 * 1000).toISOString(),
+        ticket_email_attempts: current.ticket_email_attempts + 1,
+      })
+      .eq('id', bookingId)
+      .eq('payment_status', 'paid')
+      .is('ticket_email_sent_at', null)
+      .or(`ticket_email_locked_until.is.null,ticket_email_locked_until.lt."${now.toISOString()}"`)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
+  }
+
+  public async markTicketEmailSent(bookingId: string): Promise<void> {
+    const { error } = await this.supabase
+      .from('bookings')
+      .update({ ticket_email_sent_at: new Date().toISOString() })
+      .eq('id', bookingId);
+    if (error) throw error;
+  }
+
+  public async getUnsentTicketEmailBookings(limit: number): Promise<Booking[]> {
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .select('id')
+      .eq('payment_status', 'paid')
+      .is('ticket_email_sent_at', null)
+      .lt('ticket_email_attempts', 5)
+      .order('paid_at')
+      .limit(limit);
+    if (error) throw error;
+    return data as Booking[];
+  }
+
+  public async rateLimitHit(key: string, windowSeconds: number, limit: number): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('rate_limit_hit', {
+      p_key: key,
+      p_window_seconds: windowSeconds,
+      p_limit: limit,
+    });
+    if (error) throw error;
+    return data;
+  }
+
+  public async getSalesSummary(): Promise<SalesSummary> {
+    const { data, error } = await this.supabase.rpc('admin_sales_summary').single();
+    if (error) throw error;
+    const row = data as any;
+    return {
+      paidRevenue: Number(row.paid_revenue),
+      paidBookings: Number(row.paid_bookings),
+      ticketsSold: Number(row.tickets_sold),
+      refundsPending: Number(row.refunds_pending),
+    };
+  }
+
+  public async getBookingByQrToken(token: string): Promise<Booking | null> {
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .select(BOOKING_FULL_SELECT)
+      .eq('qr_code_token', token)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
+  }
+
+  public async searchPaidBookings(query: { phoneDigits: string } | { name: string }, limit: number): Promise<Booking[]> {
+    let request = this.supabase
+      .from('bookings')
+      .select(BOOKING_FULL_SELECT)
+      .eq('payment_status', 'paid');
+
+    request = 'phoneDigits' in query
+      ? request.like('customer_phone_digits', `%${escapeLike(query.phoneDigits)}%`)
+      : request.ilike('customer_name', `%${escapeLike(query.name)}%`);
+
+    const { data, error } = await request.order('created_at', { ascending: false }).limit(limit);
+    if (error) throw error;
+    return data;
+  }
+
+  public async getPaidBookingsForShowDate(showDate: string, limit: number): Promise<Booking[]> {
+    const shows = await this.getShowsForDate(showDate);
+    if (shows.length === 0) return [];
+
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .select(BOOKING_FULL_SELECT)
+      .eq('payment_status', 'paid')
+      .in('show_id', shows.map((s) => s.id))
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return data;
+  }
+
+  public async checkInBooking(bookingId: string, staffId: string | null): Promise<boolean> {
+    // Atomic: only a paid booking that hasn't been admitted yet is updated,
+    // so two gates scanning the same ticket can't both admit it.
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .update({ checked_in_at: new Date().toISOString(), checked_in_by: staffId })
+      .eq('id', bookingId)
+      .eq('payment_status', 'paid')
+      .is('checked_in_at', null)
+      .select('id')
+      .maybeSingle();
+
+    if (error) throw error;
+    return !!data;
   }
 
   public async getBookingsByUser(userId: string): Promise<Booking[]> {
@@ -425,8 +693,8 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     });
   }
 
-  public async getAuditLogs(): Promise<AuditLog[]> {
-    const { data, error } = await this.supabase.from('audit_logs').select('*').order('created_at', { ascending: false });
+  public async getAuditLogs(limit: number): Promise<AuditLog[]> {
+    const { data, error } = await this.supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(limit);
     if (error) throw error;
     return data;
   }

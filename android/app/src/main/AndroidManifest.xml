@@ -38,4 +38,8 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Gate QR scanner (/counter) uses the camera through the WebView. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Don't hide the app on Play Store for devices without a camera. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

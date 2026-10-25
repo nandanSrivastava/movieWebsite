@@ -1,106 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { createClient } from '@supabase/supabase-js';
+import { getRequestUser } from '@/lib/requestAuth';
+import { istDateString, showStartsAt } from '@/lib/istDate';
+import { z } from 'zod';
+
+const MAX_SHOWS_PER_REQUEST = 120;
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Dates must look like 2026-11-05')
+  .refine(d => !isNaN(Date.parse(`${d}T00:00:00Z`)) && new Date(`${d}T00:00:00Z`).toISOString().startsWith(d), 'Invalid date');
+const clockTime = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d(:00)?$/, 'Times must look like 18:30');
+const ticketPrice = z.coerce.number().int('Prices must be whole rupees').min(1, 'Prices must be at least ₹1').max(5000, 'Prices above ₹5000 look like a typo');
+
+const scheduleSchema = z.object({
+  movie_id: z.string({ error: 'Missing required show fields (movie, screen, dates, times)' }).min(1).max(100),
+  screen_id: z.string({ error: 'Missing required show fields (movie, screen, dates, times)' }).min(1).max(100),
+  show_date: isoDate.optional(),
+  show_time: clockTime.optional(),
+  dates: z.array(isoDate).max(62, 'Schedule at most 62 days at once').optional(),
+  times: z.array(clockTime).max(8, 'At most 8 showtimes per day').optional(),
+  price_classic: ticketPrice.optional(),
+  price_normal: ticketPrice.optional(),
+  price_premium: ticketPrice.optional(),
+});
 
 async function isAdmin(req: NextRequest): Promise<boolean> {
   try {
-    let userRole = 'user';
-    const isSupabaseConfigured = 
-      !!process.env.NEXT_PUBLIC_SUPABASE_URL && 
-      (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-
-    if (!isSupabaseConfigured) {
-      const mockSession = req.cookies.get('cinebook_mock_session');
-      if (mockSession) {
-        const sessionObj = JSON.parse(mockSession.value);
-        userRole = sessionObj.role;
-      }
-    } else {
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-      const authHeader = req.headers.get('Authorization') || '';
-      const token = authHeader.replace('Bearer ', '');
-      
-      let userRes;
-      if (token) {
-        userRes = await supabase.auth.getUser(token);
-      } else {
-        userRes = await supabase.auth.getUser();
-      }
-
-      if (userRes.data.user) {
-        const profile = await db.getProfile(userRes.data.user.id);
-        userRole = profile?.role || 'user';
-      }
-    }
-
-    return userRole === 'admin';
+    const user = await getRequestUser(req);
+    return user?.role === 'admin';
   } catch {
     return false;
   }
 }
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   try {
-    const shows = await db.getShows();
+    // Shows from a week ago onward: keeps the list (and occupancy query) bounded
+    const fromDate = istDateString(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+    const shows = await db.getShows(fromDate);
+    const occupancy = await db.getShowOccupancy(shows.map(show => show.id));
 
-    let enrichedShows = [];
-    if (db.isMock) {
-      // In-memory mock database: load occupancy ratios
-      enrichedShows = await Promise.all(shows.map(async (show) => {
-        const seats = await db.getSeatsForShow(show.id);
-        const booked = seats.filter(s => s.status === 'booked').length;
-        const total = seats.length;
-        return {
-          ...show,
-          bookedSeats: booked,
-          totalSeats: total,
-          occupancyRate: total > 0 ? Math.round((booked / total) * 100) : 0
-        };
-      }));
-    } else {
-      // Live Supabase Mode: fetch all statuses in exactly one query
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-      
-      const { data: statuses, error: statusErr } = await supabase
-        .from('seat_status')
-        .select('show_id, status');
+    const enrichedShows = shows.map((show) => {
+      const counts = occupancy[show.id] || { booked: 0, total: 0 };
+      return {
+        ...show,
+        bookedSeats: counts.booked,
+        totalSeats: counts.total,
+        occupancyRate: counts.total > 0 ? Math.round((counts.booked / counts.total) * 100) : 0
+      };
+    });
 
-      if (statusErr) {
-        throw statusErr;
-      }
-
-      const countsMap: Record<string, { booked: number; total: number }> = {};
-      (statuses || []).forEach((item: any) => {
-        if (!countsMap[item.show_id]) {
-          countsMap[item.show_id] = { booked: 0, total: 0 };
-        }
-        countsMap[item.show_id].total++;
-        if (item.status === 'booked') {
-          countsMap[item.show_id].booked++;
-        }
-      });
-
-      enrichedShows = shows.map((show) => {
-        const counts = countsMap[show.id] || { booked: 0, total: 0 };
-        return {
-          ...show,
-          bookedSeats: counts.booked,
-          totalSeats: counts.total,
-          occupancyRate: counts.total > 0 ? Math.round((counts.booked / counts.total) * 100) : 0
-        };
-      });
-    }
-
-    return NextResponse.json({ shows: enrichedShows });
-  } catch (err: any) {
+    const response = NextResponse.json({ shows: enrichedShows });
+    response.headers.set('Cache-Control', 'public, max-age=0, s-maxage=10, stale-while-revalidate=30');
+    return response;
+  } catch (err) {
     console.error('Fetch shows API error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Could not load shows' }, { status: 500 });
   }
 }
 
@@ -109,18 +62,30 @@ export async function POST(req: NextRequest) {
     if (!(await isAdmin(req))) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
-    const body = await req.json();
-    const { movie_id, screen_id, show_date, show_time, dates, times, price_classic, price_normal, price_premium, price_recliner } = body;
+    const parsed = scheduleSchema.safeParse(await req.json().catch(() => null));
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid show details' }, { status: 400 });
+    }
+    const { movie_id, screen_id, show_date, show_time, dates, times, price_classic, price_normal, price_premium } = parsed.data;
 
-    const classicPrice = Number(price_classic ?? price_normal) || 150;
-    const premiumPrice = Number(price_premium) || 200;
+    const classicPrice = price_classic ?? price_normal ?? 150;
+    const premiumPrice = price_premium ?? 200;
 
     // Bulk creation if dates array or times array provided
-    const targetDates: string[] = (Array.isArray(dates) && dates.length > 0) ? dates : (show_date ? [show_date] : []);
-    const targetTimes: string[] = (Array.isArray(times) && times.length > 0) ? times : (show_time ? [show_time] : []);
+    const targetDates: string[] = dates?.length ? dates : (show_date ? [show_date] : []);
+    const targetTimes: string[] = times?.length ? times : (show_time ? [show_time] : []);
 
-    if (!movie_id || !screen_id || targetDates.length === 0 || targetTimes.length === 0) {
+    if (targetDates.length === 0 || targetTimes.length === 0) {
       return NextResponse.json({ error: 'Missing required show fields (movie, screen, dates, times)' }, { status: 400 });
+    }
+    // Each show writes one row per seat; keep a single request to a sane size
+    if (targetDates.length * targetTimes.length > MAX_SHOWS_PER_REQUEST) {
+      return NextResponse.json({ error: `At most ${MAX_SHOWS_PER_REQUEST} shows can be scheduled at once` }, { status: 400 });
+    }
+    const pastSlot = targetDates.flatMap(d => targetTimes.map(t => ({ d, t })))
+      .find(({ d, t }) => showStartsAt(d, t).getTime() < Date.now());
+    if (pastSlot) {
+      return NextResponse.json({ error: `${pastSlot.d} ${pastSlot.t} is in the past` }, { status: 400 });
     }
 
     const createdShows = [];
@@ -142,7 +107,8 @@ export async function POST(req: NextRequest) {
           } as any);
           createdShows.push(newShow);
         } catch (err: any) {
-          errors.push({ date, time, error: err.message });
+          console.error(`Create show ${date} ${time} failed:`, err);
+          errors.push({ date, time, error: 'Already scheduled or invalid' });
         }
       }
     }
@@ -153,9 +119,9 @@ export async function POST(req: NextRequest) {
       shows: createdShows,
       skipped: errors.length > 0 ? errors : undefined
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error('Create show error:', err);
-    return NextResponse.json({ error: err.message || 'Failed to schedule showtimes' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to schedule showtimes' }, { status: 500 });
   }
 }
 
@@ -173,8 +139,8 @@ export async function DELETE(req: NextRequest) {
 
     await db.deleteShow(id);
     return NextResponse.json({ success: true, message: 'Showtime cancelled successfully' });
-  } catch (err: any) {
+  } catch (err) {
     console.error('Delete show error:', err);
-    return NextResponse.json({ error: err.message || 'Cannot cancel showtime (it may have active bookings).' }, { status: 500 });
+    return NextResponse.json({ error: 'Cannot cancel this showtime (it may have bookings).' }, { status: 500 });
   }
 }

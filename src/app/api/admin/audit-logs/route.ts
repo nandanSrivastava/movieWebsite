@@ -1,55 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { createClient } from '@supabase/supabase-js';
+import { getRequestUser } from '@/lib/requestAuth';
+
+const MAX_LOGS = 200;
 
 export async function GET(req: NextRequest) {
   try {
-    let userRole = 'user';
-    const isSupabaseConfigured = 
-      !!process.env.NEXT_PUBLIC_SUPABASE_URL && 
-      (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-
-    if (!isSupabaseConfigured) {
-      const mockSession = req.cookies.get('cinebook_mock_session');
-      if (mockSession) {
-        try {
-          const sessionObj = JSON.parse(mockSession.value);
-          userRole = sessionObj.role;
-        } catch {}
-      }
-    } else {
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-      const authHeader = req.headers.get('Authorization') || '';
-      const token = authHeader.replace('Bearer ', '');
-      
-      let userRes;
-      if (token) {
-        userRes = await supabase.auth.getUser(token);
-      } else {
-        userRes = await supabase.auth.getUser();
-      }
-
-      if (userRes.data.user) {
-        const profile = await db.getProfile(userRes.data.user.id);
-        userRole = profile?.role || 'user';
-      }
-    }
-
-    if (userRole !== 'admin') {
+    const user = await getRequestUser(req);
+    if (user?.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden: Admin access required.' }, { status: 403 });
     }
 
-    const logs = await db.getAuditLogs();
+    const logs = await db.getAuditLogs(MAX_LOGS);
 
     const response = NextResponse.json({ logs });
-    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-
+    response.headers.set('Cache-Control', 'no-store');
     return response;
-  } catch (err: any) {
+  } catch (err) {
     console.error('Fetch audit logs API error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Could not load audit logs' }, { status: 500 });
   }
 }

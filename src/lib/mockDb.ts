@@ -1,5 +1,14 @@
 import 'server-only';
-import { Movie, Screen, SeatLayout, Show, SeatStatus, Booking, Profile, AuditLog, DatabaseClient } from './types';
+import {
+  Movie, Screen, SeatLayout, Show, SeatStatus, Booking, Profile, AuditLog, DatabaseClient,
+  LockResult, FinalizeResult, SeatAvailability, SeatHold, ActiveLock, SalesSummary, PendingBookingResult
+} from './types';
+
+import { istDateString } from './istDate';
+
+const HOLD_MS = 8 * 60 * 1000;
+const MAX_SEATS_PER_OWNER = 10;
+const MAX_SEATS_PER_IP = 24;
 
 // ── IN-MEMORY MOCK DATABASE IMPLEMENTATION ─────────────────────
 export class MockDatabase implements DatabaseClient {
@@ -15,6 +24,8 @@ export class MockDatabase implements DatabaseClient {
   private profiles = new Map<string, Profile>();
   private auditLogs: AuditLog[] = [];
   private processedWebhookEvents = new Set<string>();
+  private lockIps = new Map<string, string | null>(); // key: show_id:seat_layout_id
+  private rateLimits = new Map<string, number>();
 
   constructor() {
     this.seed();
@@ -182,9 +193,9 @@ export class MockDatabase implements DatabaseClient {
     this.seatLayouts.set(s1, screen1Layouts);
 
     // 4. Seed Shows (Single Screen Sequential Schedule)
-    const today = new Date().toISOString().split('T')[0];
-    const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
-    const dayAfter = new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0];
+    const today = istDateString();
+    const tomorrow = istDateString(new Date(Date.now() + 86400000));
+    const dayAfter = istDateString(new Date(Date.now() + 86400000 * 2));
 
     const showTimes = ['10:00:00', '13:30:00', '17:00:00', '20:30:00'];
 
@@ -233,10 +244,7 @@ export class MockDatabase implements DatabaseClient {
       if (status.status === 'locked' && status.lock_expires_at) {
         const expiresTime = new Date(status.lock_expires_at).getTime();
         if (expiresTime < now) {
-          status.status = 'available';
-          status.locked_by = null;
-          status.locked_at = null;
-          status.lock_expires_at = null;
+          this.clearHold(key, status);
         }
       }
     }
@@ -296,8 +304,11 @@ export class MockDatabase implements DatabaseClient {
     return newScreen;
   }
 
-  public async getShows(): Promise<Show[]> {
-    return Array.from(this.shows.values()).map(s => this.enrichShow(s));
+  public async getShows(fromDate?: string): Promise<Show[]> {
+    return Array.from(this.shows.values())
+      .filter(s => !fromDate || s.show_date >= fromDate)
+      .sort((a, b) => `${a.show_date}${a.show_time}`.localeCompare(`${b.show_date}${b.show_time}`))
+      .map(s => this.enrichShow(s));
   }
 
   public async getShowsForDate(date: string): Promise<Show[]> {
@@ -378,157 +389,321 @@ export class MockDatabase implements DatabaseClient {
     return result;
   }
 
-  public async lockSeats(showId: string, seatLayoutIds: string[], userId: string, holdSeconds = 360): Promise<boolean> {
+  private isActiveHold(seat: SeatStatus) {
+    return seat.status === 'locked' && !!seat.lock_expires_at && new Date(seat.lock_expires_at).getTime() > Date.now();
+  }
+
+  private clearHold(key: string, seat: SeatStatus) {
+    seat.status = 'available';
+    seat.locked_by = null;
+    seat.locked_at = null;
+    seat.lock_expires_at = null;
+    this.lockIps.delete(key);
+  }
+
+  public async getSeatAvailability(showId: string): Promise<SeatAvailability[]> {
+    const seats = await this.getSeatsForShow(showId);
+    return seats.map(s => ({ seat_layout_id: s.seat_layout_id, status: s.status }));
+  }
+
+  public async getSeatHolds(showId: string, owner: string): Promise<SeatHold[]> {
     this.sweepExpiredLocks();
-    
-    // Simulate NOWAIT atomic check
-    for (const layoutId of seatLayoutIds) {
-      const current = this.seatStatuses.get(`${showId}:${layoutId}`);
-      if (!current || current.status !== 'available') {
-        return false; // seat not available or locked
+    return Array.from(this.seatStatuses.values())
+      .filter(s => s.show_id === showId && s.locked_by === owner && this.isActiveHold(s))
+      .map(s => ({ seat_layout_id: s.seat_layout_id, lock_expires_at: s.lock_expires_at! }));
+  }
+
+  // Mirrors public.lock_seats() in supabase/migrations/002_launch_hardening.sql
+  public async lockSeats(showId: string, seatLayoutIds: string[], owner: string, clientIp: string | null): Promise<LockResult> {
+    this.sweepExpiredLocks();
+    const ids = Array.from(new Set(seatLayoutIds));
+    if (!owner || ids.length === 0 || ids.length > MAX_SEATS_PER_OWNER) return 'invalid';
+
+    const show = this.shows.get(showId);
+    if (!show) return 'invalid';
+    if (new Date(`${show.show_date}T${show.show_time}+05:30`).getTime() < Date.now()) return 'show_started';
+
+    const targets = ids.map(id => this.seatStatuses.get(`${showId}:${id}`));
+    if (targets.some(t => !t)) return 'invalid';
+    if (targets.some(t => t!.status === 'booked' || (this.isActiveHold(t!) && t!.locked_by !== owner))) return 'taken';
+
+    const active = Array.from(this.seatStatuses.entries()).filter(([, st]) => this.isActiveHold(st));
+    const ownerHeld = active.filter(([, st]) => st.locked_by === owner && st.show_id !== showId).length;
+    if (ownerHeld + ids.length > MAX_SEATS_PER_OWNER) return 'owner_cap';
+    if (clientIp) {
+      const ipHeld = active.filter(([key, st]) =>
+        this.lockIps.get(key) === clientIp && !(st.show_id === showId && st.locked_by === owner)).length;
+      if (ipHeld + ids.length > MAX_SEATS_PER_IP) return 'ip_cap';
+    }
+
+    for (const [key, st] of this.seatStatuses.entries()) {
+      if (st.show_id === showId && st.locked_by === owner && st.status === 'locked' && !ids.includes(st.seat_layout_id)) {
+        this.clearHold(key, st);
       }
     }
 
-    // Acquire lock
-    const expiresAt = new Date(Date.now() + (holdSeconds + 15) * 1000).toISOString();
-    seatLayoutIds.forEach((layoutId) => {
-      const current = this.seatStatuses.get(`${showId}:${layoutId}`)!;
-      current.status = 'locked';
-      current.locked_by = userId;
-      current.locked_at = new Date().toISOString();
-      current.lock_expires_at = expiresAt;
+    const expiresAt = new Date(Date.now() + HOLD_MS).toISOString();
+    ids.forEach((id) => {
+      const st = this.seatStatuses.get(`${showId}:${id}`)!;
+      st.status = 'locked';
+      st.locked_by = owner;
+      st.locked_at = new Date().toISOString();
+      st.lock_expires_at = expiresAt;
+      this.lockIps.set(`${showId}:${id}`, clientIp);
     });
-
-    return true;
+    return 'ok';
   }
 
-  public async unlockSeats(showId: string, seatLayoutIds: string[], userId: string, force = false): Promise<boolean> {
-    seatLayoutIds.forEach((layoutId) => {
-      const current = this.seatStatuses.get(`${showId}:${layoutId}`);
-      if (current && current.status === 'locked' && (force || current.locked_by === userId)) {
-        current.status = 'available';
-        current.locked_by = null;
-        current.locked_at = null;
-        current.lock_expires_at = null;
-      }
+  public async extendSeatHolds(showId: string, seatLayoutIds: string[], owner: string, seconds: number): Promise<string | null> {
+    this.sweepExpiredLocks();
+    const expires = new Date(Date.now() + Math.min(Math.max(seconds, 60), 1200) * 1000).toISOString();
+    const held = seatLayoutIds
+      .map(id => this.seatStatuses.get(`${showId}:${id}`))
+      .filter(st => st && st.locked_by === owner && this.isActiveHold(st)) as SeatStatus[];
+    held.forEach(st => { if (st.lock_expires_at! < expires) st.lock_expires_at = expires; });
+    return held.length === new Set(seatLayoutIds).size ? expires : null;
+  }
+
+  public async releaseSeatHolds(showId: string, seatLayoutIds: string[], owner: string): Promise<void> {
+    seatLayoutIds.forEach((id) => {
+      const key = `${showId}:${id}`;
+      const st = this.seatStatuses.get(key);
+      if (st && st.status === 'locked' && st.locked_by === owner) this.clearHold(key, st);
     });
-    return true;
+  }
+
+  public async forceReleaseSeatHolds(showId: string, seatLayoutIds: string[]): Promise<void> {
+    seatLayoutIds.forEach((id) => {
+      const key = `${showId}:${id}`;
+      const st = this.seatStatuses.get(key);
+      if (st && st.status === 'locked') this.clearHold(key, st);
+    });
+  }
+
+  public async getActiveLocks(): Promise<ActiveLock[]> {
+    this.sweepExpiredLocks();
+    const locks: ActiveLock[] = [];
+    for (const st of this.seatStatuses.values()) {
+      if (!this.isActiveHold(st)) continue;
+      const show = this.shows.get(st.show_id);
+      const layout = (this.seatLayouts.get(show?.screen_id || '') || []).find(l => l.id === st.seat_layout_id);
+      locks.push({
+        showId: st.show_id,
+        seatLayoutId: st.seat_layout_id,
+        seatLabel: `${layout?.row_label}-${layout?.seat_number}`,
+        lockedBy: st.locked_by,
+        expiresAt: st.lock_expires_at!,
+        movieTitle: show ? this.movies.get(show.movie_id)?.title || 'Unknown Movie' : 'Unknown Movie',
+        screenName: show ? this.screens.get(show.screen_id)?.name || 'Standard Screen' : 'Standard Screen',
+        showDate: show?.show_date || '',
+        showTime: show?.show_time || '',
+      });
+    }
+    return locks;
+  }
+
+  public async getShowOccupancy(showIds: string[]): Promise<Record<string, { total: number; booked: number }>> {
+    const result: Record<string, { total: number; booked: number }> = {};
+    for (const id of showIds) {
+      const seats = Array.from(this.seatStatuses.values()).filter(st => st.show_id === id);
+      result[id] = { total: seats.length, booked: seats.filter(st => st.status === 'booked').length };
+    }
+    return result;
   }
 
   // ── BOOKING MANAGEMENT ─────────────────────────────────────
-  public async createBooking(
-    showId: string,
-    seatLayoutIds: string[],
-    userId: string | null,
-    channel: 'online' | 'counter',
-    customerDetails: { name?: string; phone?: string; email?: string; idempotencyKey?: string }
-  ): Promise<Booking> {
-    if (customerDetails.idempotencyKey) {
-      const existing = Array.from(this.bookings.values()).find(
-        b => b.client_idempotency_key === customerDetails.idempotencyKey
-      );
-      if (existing) return existing;
-    }
+  // Mirrors public.create_pending_booking() in supabase/migrations/004_abuse_and_performance.sql
+  public async createPendingBooking(params: Parameters<DatabaseClient['createPendingBooking']>[0]): Promise<PendingBookingResult> {
+    const { showId, userId, holdOwner, channel, name, phone, email, idempotencyKey, holdSeconds } = params;
+    const ids = Array.from(new Set(params.seatLayoutIds)).sort();
+    const invalid: PendingBookingResult = { status: 'invalid', booking: null, holdExpiresAt: null };
+    if (!holdOwner || ids.length === 0 || ids.length > 10) return invalid;
 
     const show = this.shows.get(showId);
-    if (!show) throw new Error('Show not found');
-
-    // Recalculate amount
-    const screenLayouts = this.seatLayouts.get(show.screen_id) || [];
-    let total = 0;
-    const itemizedSeats: { seat_layout_id: string; price: number }[] = [];
-
-    for (const layoutId of seatLayoutIds) {
-      const layout = screenLayouts.find(l => l.id === layoutId);
-      if (!layout) throw new Error('Invalid seat layout');
-
-      let price = show.price_classic ?? (show as any).price_normal ?? 150;
-      if (layout.category === 'premium') price = show.price_premium;
-      
-      total += Number(price);
-      itemizedSeats.push({ seat_layout_id: layoutId, price: Number(price) });
+    if (!show) return invalid;
+    if (new Date(`${show.show_date}T${show.show_time}+05:30`).getTime() < Date.now()) {
+      return { status: 'show_started', booking: null, holdExpiresAt: null };
     }
 
-    const bookingId = Math.random().toString(36).substring(2, 9);
-    const orderId = channel === 'online' ? `order_${Math.random().toString(36).substring(2, 9)}` : null;
+    let existing = Array.from(this.bookings.values()).find(b => b.client_idempotency_key === idempotencyKey);
+    if (existing && existing.hold_owner !== holdOwner) return invalid;
+    if (existing?.payment_status === 'paid') return { status: 'existing', booking: existing, holdExpiresAt: null };
 
-    const newBooking: Booking = {
-      id: bookingId,
+    const holdExpiresAt = await this.extendSeatHolds(showId, ids, holdOwner, holdSeconds);
+    if (!holdExpiresAt) return { status: 'hold_expired', booking: null, holdExpiresAt: null };
+    if (existing) return { status: 'existing', booking: existing, holdExpiresAt };
+
+    const seatKey = (bookingId: string) =>
+      this.bookingSeats.filter(bs => bs.booking_id === bookingId).map(bs => bs.seat_layout_id).sort().join(',');
+    existing = Array.from(this.bookings.values()).find(b =>
+      b.hold_owner === holdOwner && b.show_id === showId && b.booking_channel === channel &&
+      b.payment_status === 'pending' && Date.now() - new Date(b.created_at).getTime() < 30 * 60 * 1000 &&
+      seatKey(b.id) === ids.join(','));
+    if (existing) {
+      Object.assign(existing, { customer_name: name, customer_phone: phone, customer_email: email });
+      return { status: 'existing', booking: existing, holdExpiresAt };
+    }
+
+    const layouts = this.seatLayouts.get(show.screen_id) || [];
+    const items = ids.map(id => layouts.find(l => l.id === id));
+    if (items.some(l => !l)) return invalid;
+    const priced = items.map(l => ({
+      seat_layout_id: l!.id,
+      price: Number(l!.category === 'premium' ? show.price_premium : show.price_classic ?? 150),
+    }));
+
+    const booking: Booking = {
+      id: Math.random().toString(36).substring(2, 9),
       show_id: showId,
       booked_by: userId,
       booking_channel: channel,
-      customer_name: customerDetails.name || null,
-      customer_phone: customerDetails.phone || null,
-      customer_email: customerDetails.email || null,
-      total_amount: total,
+      customer_name: name,
+      customer_phone: phone,
+      customer_email: email,
+      total_amount: priced.reduce((sum, i) => sum + i.price, 0),
       payment_status: 'pending',
-      razorpay_order_id: orderId,
+      razorpay_order_id: null,
       razorpay_payment_id: null,
-      client_idempotency_key: customerDetails.idempotencyKey || null,
+      client_idempotency_key: idempotencyKey,
       qr_code_token: null,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      hold_owner: holdOwner,
+      access_key: crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, ''),
+      paid_at: null,
+      ticket_email_sent_at: null,
     };
-
-    this.bookings.set(bookingId, newBooking);
-
-    // Save items
-    itemizedSeats.forEach((item) => {
-      this.bookingSeats.push({
-        booking_id: bookingId,
-        seat_layout_id: item.seat_layout_id,
-        price: item.price
-      });
-    });
-
-    return newBooking;
+    this.bookings.set(booking.id, booking);
+    priced.forEach(item => this.bookingSeats.push({ booking_id: booking.id, ...item }));
+    return { status: 'ok', booking, holdExpiresAt };
   }
 
-  public async confirmBooking(bookingId: string, showId: string, seatLayoutIds: string[], userId: string | null): Promise<boolean> {
+  public async setBookingOrderId(bookingId: string, orderId: string): Promise<void> {
+    const booking = this.bookings.get(bookingId);
+    if (booking) booking.razorpay_order_id = orderId;
+  }
+
+  // Mirrors public.finalize_payment() in supabase/migrations/002_launch_hardening.sql
+  public async finalizePayment(
+    bookingId: string,
+    paymentId: string,
+    qrToken: string,
+    conflictStatus: 'refund_pending' | 'failed'
+  ): Promise<FinalizeResult> {
     this.sweepExpiredLocks();
-    
-    // Validate current locks
-    for (const layoutId of seatLayoutIds) {
-      const current = this.seatStatuses.get(`${showId}:${layoutId}`);
-      // If it's a counter booking, skip user lock checks since cashier confirms physical payment
-      if (userId) {
-        if (!current || current.status !== 'locked' || current.locked_by !== userId) {
-          return false; // lock expired or belong to someone else
-        }
-      }
+    const booking = this.bookings.get(bookingId);
+    if (!booking) return 'not_found';
+    if (booking.payment_status === 'paid') return 'already_paid';
+    if (booking.payment_status === 'refund_pending' || booking.payment_status === 'refunded') return 'refunding';
+
+    const ids = this.bookingSeats.filter(bs => bs.booking_id === bookingId).map(bs => bs.seat_layout_id);
+    const seats = ids.map(id => this.seatStatuses.get(`${booking.show_id}:${id}`));
+    const allOurs = ids.length > 0 && seats.every(st => st && (
+      (st.status === 'booked' && st.booking_id === bookingId) ||
+      st.status === 'available' ||
+      (st.status === 'locked' && (!this.isActiveHold(st) || st.locked_by === booking.hold_owner))
+    ));
+
+    if (allOurs) {
+      ids.forEach((id) => {
+        const key = `${booking.show_id}:${id}`;
+        const st = this.seatStatuses.get(key)!;
+        this.clearHold(key, st);
+        st.status = 'booked';
+        st.booking_id = bookingId;
+      });
+      booking.payment_status = 'paid';
+      booking.razorpay_payment_id = paymentId;
+      booking.qr_code_token = booking.qr_code_token || qrToken;
+      booking.paid_at = new Date().toISOString();
+      return 'confirmed';
     }
 
-    // Set seats as booked
-    seatLayoutIds.forEach((layoutId) => {
-      const current = this.seatStatuses.get(`${showId}:${layoutId}`)!;
-      current.status = 'booked';
-      current.booking_id = bookingId;
-      current.locked_by = null;
-      current.locked_at = null;
-      current.lock_expires_at = null;
-    });
+    booking.payment_status = conflictStatus;
+    booking.razorpay_payment_id = paymentId;
+    if (conflictStatus === 'refund_pending') booking.refund_reason = 'seats_unavailable';
+    return 'conflict';
+  }
 
+  public async expirePendingBooking(bookingId: string): Promise<boolean> {
+    const booking = this.bookings.get(bookingId);
+    if (!booking || booking.payment_status !== 'pending') return false;
+    booking.payment_status = 'failed';
     return true;
   }
 
-  public async finalizeBooking(bookingId: string, paymentId: string, qrToken: string): Promise<Booking> {
+  public async queueRefund(bookingId: string, paymentId: string, reason: string): Promise<boolean> {
     const booking = this.bookings.get(bookingId);
-    if (!booking) throw new Error('Booking not found');
-
-    // Idempotent: first finalize wins, QR token stays stable on duplicates
-    if (booking.payment_status !== 'paid') {
-      booking.payment_status = 'paid';
-      booking.razorpay_payment_id = paymentId;
-      booking.qr_code_token = qrToken;
-    }
-
-    return booking;
+    if (!booking || (booking.payment_status !== 'pending' && booking.payment_status !== 'failed')) return false;
+    booking.payment_status = 'refund_pending';
+    booking.razorpay_payment_id = paymentId;
+    booking.refund_reason = reason;
+    return true;
   }
 
-  public async updateBookingStatus(bookingId: string, status: Booking['payment_status']): Promise<Booking> {
+  public async claimRefund(bookingId: string): Promise<Booking | null> {
     const booking = this.bookings.get(bookingId);
-    if (!booking) throw new Error('Booking not found');
-    booking.payment_status = status;
-    return booking;
+    return booking && booking.payment_status === 'refund_pending' ? booking : null;
+  }
+
+  public async completeRefund(bookingId: string, refundId: string | null): Promise<void> {
+    const booking = this.bookings.get(bookingId);
+    if (booking && booking.payment_status === 'refund_pending') {
+      booking.payment_status = 'refunded';
+      booking.razorpay_refund_id = refundId;
+    }
+  }
+
+  public async getPendingOnlineBookings(olderThanSeconds: number, limit: number): Promise<Booking[]> {
+    const cutoff = Date.now() - olderThanSeconds * 1000;
+    return Array.from(this.bookings.values())
+      .filter(b => b.payment_status === 'pending' && b.booking_channel === 'online' && new Date(b.created_at).getTime() < cutoff)
+      .slice(0, limit);
+  }
+
+  public async getRefundPendingBookings(limit: number): Promise<Booking[]> {
+    return Array.from(this.bookings.values()).filter(b => b.payment_status === 'refund_pending').slice(0, limit);
+  }
+
+  public async hasProcessedWebhookEvent(eventId: string): Promise<boolean> {
+    return this.processedWebhookEvents.has(eventId);
+  }
+
+  public async recordWebhookEvent(eventId: string): Promise<void> {
+    this.processedWebhookEvents.add(eventId);
+  }
+
+  public async claimTicketEmail(bookingId: string): Promise<boolean> {
+    const booking = this.bookings.get(bookingId);
+    return !!booking && booking.payment_status === 'paid' && !booking.ticket_email_sent_at;
+  }
+
+  public async markTicketEmailSent(bookingId: string): Promise<void> {
+    const booking = this.bookings.get(bookingId);
+    if (booking) booking.ticket_email_sent_at = new Date().toISOString();
+  }
+
+  public async getUnsentTicketEmailBookings(limit: number): Promise<Booking[]> {
+    return Array.from(this.bookings.values())
+      .filter(b => b.payment_status === 'paid' && !b.ticket_email_sent_at)
+      .slice(0, limit);
+  }
+
+  public async rateLimitHit(key: string, windowSeconds: number, limit: number): Promise<boolean> {
+    const windowKey = `${key}:${Math.floor(Date.now() / 1000 / windowSeconds)}`;
+    const hits = (this.rateLimits.get(windowKey) || 0) + 1;
+    this.rateLimits.set(windowKey, hits);
+    return hits <= limit;
+  }
+
+  public async getSalesSummary(): Promise<SalesSummary> {
+    const paid = Array.from(this.bookings.values()).filter(b => b.payment_status === 'paid');
+    const paidIds = new Set(paid.map(b => b.id));
+    return {
+      paidRevenue: paid.reduce((sum, b) => sum + Number(b.total_amount), 0),
+      paidBookings: paid.length,
+      ticketsSold: this.bookingSeats.filter(bs => paidIds.has(bs.booking_id)).length,
+      refundsPending: Array.from(this.bookings.values()).filter(b => b.payment_status === 'refund_pending').length,
+    };
   }
 
   public async getBookingById(id: string): Promise<Booking | null> {
@@ -555,13 +730,66 @@ export class MockDatabase implements DatabaseClient {
     };
   }
 
-  public async getBookings(): Promise<Booking[]> {
+  public async getBookingByOrderId(orderId: string): Promise<Booking | null> {
+    const match = Array.from(this.bookings.values()).find(b => b.razorpay_order_id === orderId);
+    return match ? this.getBookingById(match.id) : null;
+  }
+
+  public async findPaidBookingsByPhone(phoneDigits: string, limit: number): Promise<Booking[]> {
+    const matches = Array.from(this.bookings.values())
+      .filter(b => b.payment_status === 'paid' && (b.customer_phone || '').replace(/\D/g, '').endsWith(phoneDigits))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
     const list: Booking[] = [];
-    for (const b of this.bookings.values()) {
+    for (const b of matches) {
       const full = await this.getBookingById(b.id);
       if (full) list.push(full);
     }
     return list;
+  }
+
+  public async getBookingByQrToken(token: string): Promise<Booking | null> {
+    const match = Array.from(this.bookings.values()).find(b => b.qr_code_token === token);
+    return match ? this.getBookingById(match.id) : null;
+  }
+
+  public async searchPaidBookings(query: { phoneDigits: string } | { name: string }, limit: number): Promise<Booking[]> {
+    const matches = Array.from(this.bookings.values())
+      .filter(b => b.payment_status === 'paid')
+      .filter(b => 'phoneDigits' in query
+        ? (b.customer_phone || '').replace(/\D/g, '').includes(query.phoneDigits)
+        : (b.customer_name || '').toLowerCase().includes(query.name.toLowerCase()))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
+
+    const list: Booking[] = [];
+    for (const b of matches) {
+      const full = await this.getBookingById(b.id);
+      if (full) list.push(full);
+    }
+    return list;
+  }
+
+  public async getPaidBookingsForShowDate(showDate: string, limit: number): Promise<Booking[]> {
+    const matches = Array.from(this.bookings.values())
+      .filter(b => b.payment_status === 'paid' && this.shows.get(b.show_id)?.show_date === showDate)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
+
+    const list: Booking[] = [];
+    for (const b of matches) {
+      const full = await this.getBookingById(b.id);
+      if (full) list.push(full);
+    }
+    return list;
+  }
+
+  public async checkInBooking(bookingId: string, staffId: string | null): Promise<boolean> {
+    const booking = this.bookings.get(bookingId);
+    if (!booking || booking.payment_status !== 'paid' || booking.checked_in_at) return false;
+    booking.checked_in_at = new Date().toISOString();
+    booking.checked_in_by = staffId;
+    return true;
   }
 
   public async getBookingsByUser(userId: string): Promise<Booking[]> {
@@ -646,8 +874,8 @@ export class MockDatabase implements DatabaseClient {
     });
   }
 
-  public async getAuditLogs(): Promise<AuditLog[]> {
-    return this.auditLogs;
+  public async getAuditLogs(limit: number): Promise<AuditLog[]> {
+    return [...this.auditLogs].reverse().slice(0, limit);
   }
 }
 

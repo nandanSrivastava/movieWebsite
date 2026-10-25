@@ -7,7 +7,10 @@ const securityHeaders = [
   { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+  // camera=(self): the /counter gate scanner calls getUserMedia on our own
+  // origin. Third-party frames still get no camera.
+  // payment: Razorpay Checkout's frames may use the browser Payment Request API.
+  { key: "Permissions-Policy", value: 'camera=(self), microphone=(), geolocation=(), payment=(self "https://api.razorpay.com" "https://checkout.razorpay.com")' },
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
 ];
 

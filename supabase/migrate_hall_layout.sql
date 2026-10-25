@@ -4,6 +4,16 @@
 -- Then click RUN ▶
 -- ============================================================
 
+-- ⚠️  ONE-TIME HISTORICAL MIGRATION — already applied to production.
+--     It deletes all seat_status and booking_seats rows, so it refuses
+--     to run once any booking exists. New changes go in supabase/migrations/.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.booking_seats LIMIT 1) THEN
+    RAISE EXCEPTION 'migrate_hall_layout.sql would delete existing bookings'' seats. It has already been applied; do not re-run it.';
+  END IF;
+END $$;
+
 -- 1. Add price_classic column to shows
 ALTER TABLE public.shows
   ADD COLUMN IF NOT EXISTS price_classic NUMERIC(10,2) NOT NULL DEFAULT 150;

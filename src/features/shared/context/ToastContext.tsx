@@ -1,6 +1,8 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
+import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import styles from './Toast.module.css';
 
 type ToastType = 'success' | 'error' | 'info';
 
@@ -16,108 +18,54 @@ interface ToastContextType {
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined);
 
+// Errors stay longer: they usually ask the person to do something
+const DURATION: Record<ToastType, number> = { success: 4000, info: 4500, error: 7000 };
+const MAX_VISIBLE = 3;
+const ICONS = { success: CheckCircle2, error: AlertCircle, info: Info };
+
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
-
-  const showToast = useCallback((message: string, type: ToastType = 'info') => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { id, message, type }]);
-
-    // Auto-dismiss after 4 seconds
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  }, []);
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const removeToast = useCallback((id: string) => {
+    clearTimeout(timers.current.get(id));
+    timers.current.delete(id);
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const showToast = useCallback((message: string, type: ToastType = 'info') => {
+    // The same message twice (double click, a re-render) refreshes the one on screen
+    const id = `${type}:${message}`;
+    clearTimeout(timers.current.get(id));
+    timers.current.set(id, setTimeout(() => removeToast(id), DURATION[type]));
+    setToasts((prev) => {
+      const rest = prev.filter((t) => t.id !== id);
+      return [...rest, { id, message, type }].slice(-MAX_VISIBLE);
+    });
+  }, [removeToast]);
 
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      {/* Toast Portal Container */}
-      <div style={{
-        position: 'fixed',
-        top: '24px',
-        right: '24px',
-        zIndex: 9999,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px',
-        maxWidth: '380px',
-        width: '100%',
-        pointerEvents: 'none'
-      }}>
+      {/* Always mounted, so screen readers hear new messages */}
+      <div className={styles.stack} aria-live="polite" aria-relevant="additions">
         {toasts.map((toast) => {
-          // Color styles based on type
-          let bgColor = '#1A1A22';
-          let borderColor = '#25252E';
-          let iconColor = '#E5C158';
-          let textColor = '#FFFFFF';
-
-          if (toast.type === 'success') {
-            bgColor = 'rgba(16, 185, 129, 0.1)';
-            borderColor = '#10B981';
-            iconColor = '#10B981';
-          } else if (toast.type === 'error') {
-            bgColor = 'rgba(229, 9, 20, 0.1)';
-            borderColor = '#E50914';
-            iconColor = '#E50914';
-          }
-
+          const Icon = ICONS[toast.type];
           return (
             <div
               key={toast.id}
-              onClick={() => removeToast(toast.id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                padding: '16px 20px',
-                backgroundColor: bgColor,
-                border: `1px solid ${borderColor}`,
-                borderRadius: '8px',
-                boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)',
-                color: textColor,
-                fontSize: '0.95rem',
-                cursor: 'pointer',
-                pointerEvents: 'auto',
-                userSelect: 'none',
-                animation: 'toastFadeIn 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                transition: 'all 0.2s ease',
-              }}
+              className={`${styles.toast} ${styles[toast.type]}`}
+              role={toast.type === 'error' ? 'alert' : 'status'}
             >
-              {/* Icon indicator */}
-              <span style={{
-                color: iconColor,
-                fontWeight: 'bold',
-                fontSize: '1.2rem',
-                minWidth: '20px'
-              }}>
-                {toast.type === 'success' && '✓'}
-                {toast.type === 'error' && '✕'}
-                {toast.type === 'info' && 'ℹ'}
-              </span>
-              <span style={{ flex: 1, lineHeight: '1.4' }}>{toast.message}</span>
+              <Icon aria-hidden />
+              <span className={styles.message}>{toast.message}</span>
+              <button type="button" className={styles.close} onClick={() => removeToast(toast.id)} aria-label="Dismiss">
+                <X aria-hidden />
+              </button>
             </div>
           );
         })}
       </div>
-
-      {/* Global CSS for Animations */}
-      <style jsx global>{`
-        @keyframes toastFadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(-16px) scale(0.95);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
-        }
-      `}</style>
     </ToastContext.Provider>
   );
 }

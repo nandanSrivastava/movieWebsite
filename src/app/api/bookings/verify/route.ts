@@ -1,138 +1,76 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getStaffUser } from '@/lib/requestAuth';
+
+const SEARCH_LIMIT = 10;
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const token = searchParams.get('token');
+    const staff = await getStaffUser(req);
+    if (!staff) {
+      return NextResponse.json({ error: 'Forbidden: Only counter staff and administrators can verify tickets.' }, { status: 403 });
+    }
 
-    if (!token) {
+    const { searchParams } = new URL(req.url);
+    const input = (searchParams.get('token') || '').trim();
+
+    if (!input) {
       return NextResponse.json({ error: 'Missing token parameter' }, { status: 400 });
     }
 
-    const cleanedToken = token.trim();
+    // 1. Exact ticket: a scanned QR token (tkt_...) or the booking ID printed on the ticket.
+    //    Only an exact match counts; partial tokens never verify a ticket.
+    const booking = input.startsWith('tkt_')
+      ? await db.getBookingByQrToken(input)
+      : await db.getBookingById(input);
 
-    let userRole = 'user';
-    
-    // Check mock session cookie
-    const mockSession = req.cookies.get('cinebook_mock_session');
-    if (mockSession) {
-      try {
-        const sessionObj = JSON.parse(mockSession.value);
-        if (sessionObj?.role) {
-          userRole = sessionObj.role;
-        }
-      } catch {}
-    }
-
-    // Check Supabase session if configured
-    const isSupabaseConfigured = !!process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (userRole === 'user' && isSupabaseConfigured) {
-      try {
-        const { createServerClient } = await import('@supabase/ssr');
-        const { cookies } = await import('next/headers');
-        const cookieStore = await cookies();
-        const supabase = createServerClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          {
-            cookies: {
-              getAll() {
-                return cookieStore.getAll();
-              },
-              setAll(cookiesToSet) {
-                try {
-                  cookiesToSet.forEach(({ name, value, options }) =>
-                    cookieStore.set(name, value, options)
-                  );
-                } catch {}
-              },
-            },
-          }
-        );
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const profile = await db.getProfile(user.id);
-          userRole = profile?.role || 'user';
-        }
-      } catch (authErr) {
-        console.warn('Auth check error in verify route:', authErr);
+    if (booking) {
+      if (booking.payment_status !== 'paid') {
+        return NextResponse.json({
+          verified: false,
+          error: `Ticket payment is pending or incomplete. Current Status: ${booking.payment_status}`
+        }, { status: 400 });
       }
+      return noStore({ verified: true, booking });
     }
 
-    // Allow staff / admin or authenticated verification
-    if (userRole !== 'admin' && userRole !== 'member') {
-      // Fallback: If request has auth cookie or header, allow ticket verification
-      const authHeader = req.headers.get('authorization');
-      if (!mockSession && !authHeader) {
-        // Staff check warning but proceed with verification for POS terminal
-      }
-    }
-
-    // 1. Look up booking by ID directly
-    let booking = await db.getBookingById(cleanedToken);
-
-    // 2. If not found, try extracting booking ID from signature format (tkt_bookingId_hash)
-    if (!booking) {
-      const match = cleanedToken.match(/tkt_(?:cash_)?([a-zA-Z0-9_\-]+)_[a-zA-Z0-9]+/);
-      const extractedId = match ? match[1] : cleanedToken;
-      booking = await db.getBookingById(extractedId);
-    }
-
-    // 3. Flexible lookup: search all bookings for matching token substring, phone number, or customer name
-    if (!booking) {
-      const allBookings = await db.getBookings();
-      
-      const searchLower = cleanedToken.toLowerCase();
-      const normalizePhone = (p: string) => (p || '').replace(/[\s\-\+]/g, '').replace(/^(91|0)/, '');
-      const searchPhoneNorm = normalizePhone(searchLower);
-
-      // Sort bookings by creation date descending so recent/today bookings match first
-      const sortedBookings = [...allBookings].sort((a: any, b: any) => {
-        const timeA = new Date(a.created_at || 0).getTime();
-        const timeB = new Date(b.created_at || 0).getTime();
-        return timeB - timeA;
-      });
-
-      booking = sortedBookings.find((b: any) => {
-        const bId = (b.id || '').toLowerCase();
-        const bQr = (b.qr_code_token || '').toLowerCase();
-        const bPhone = normalizePhone(b.customer_phone || '');
-        const bName = (b.customer_name || '').toLowerCase();
-
-        return (
-          bId === searchLower ||
-          bQr === searchLower ||
-          bQr.includes(searchLower) ||
-          bId.includes(searchLower) ||
-          bQr.endsWith(searchLower) ||
-          bId.endsWith(searchLower) ||
-          (searchPhoneNorm.length >= 4 && bPhone.includes(searchPhoneNorm)) ||
-          (searchLower.length >= 3 && bName.includes(searchLower))
-        );
-      }) || null;
-    }
-
-    if (!booking) {
+    if (input.startsWith('tkt_')) {
       return NextResponse.json({ verified: false, error: 'Ticket not found in the cinema registry.' }, { status: 404 });
     }
 
-    // Check payment status
-    const isPaid = ['paid', 'confirmed'].includes(booking.payment_status?.toLowerCase());
-    if (!isPaid) {
-      return NextResponse.json({ 
-        verified: false, 
-        error: `Ticket payment is pending or incomplete. Current Status: ${booking.payment_status}` 
-      }, { status: 400 });
+    // 2. Search by phone or customer name. Returns every paid match so staff
+    //    can pick the right customer; nothing is admitted from a search.
+    const phoneCandidate = input.replace(/[\s\-+()]/g, '');
+    let matches;
+
+    if (/^\d+$/.test(phoneCandidate)) {
+      if (phoneCandidate.length < 4) {
+        return NextResponse.json({ error: 'Enter at least 4 digits of the phone number.' }, { status: 400 });
+      }
+      // A full number may carry a 91 / 0 prefix; the last 10 digits are the subscriber number
+      const phoneDigits = phoneCandidate.length > 10 ? phoneCandidate.slice(-10) : phoneCandidate;
+      matches = await db.searchPaidBookings({ phoneDigits }, SEARCH_LIMIT);
+    } else {
+      if (input.length < 3) {
+        return NextResponse.json({ error: 'Enter at least 3 letters of the customer name.' }, { status: 400 });
+      }
+      matches = await db.searchPaidBookings({ name: input }, SEARCH_LIMIT);
     }
 
-    return NextResponse.json({
-      verified: true,
-      booking
-    });
+    if (matches.length === 0) {
+      return NextResponse.json({ verified: false, error: 'No paid tickets match that phone number or name.' }, { status: 404 });
+    }
 
-  } catch (err: any) {
+    return noStore({ matches });
+
+  } catch (err) {
     console.error('Verify booking API error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Could not check the ticket right now' }, { status: 500 });
   }
+}
+
+function noStore(body: unknown) {
+  const response = NextResponse.json(body);
+  response.headers.set('Cache-Control', 'no-store');
+  return response;
 }

@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { getStaffUser } from '@/lib/requestAuth';
+import { istDateString } from '@/lib/istDate';
 
 export async function GET(req: NextRequest) {
   try {
-    const allBookings = await db.getBookings();
-    
-    // Return recent paid/confirmed bookings sorted by newest first
-    const confirmed = allBookings
-      .filter((b: any) => ['paid', 'confirmed'].includes((b.payment_status || '').toLowerCase()))
-      .sort((a: any, b: any) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
-      .slice(0, 30);
+    const staff = await getStaffUser(req);
+    if (!staff) {
+      return NextResponse.json({ error: 'Forbidden: Counter staff access required.' }, { status: 403 });
+    }
 
-    return NextResponse.json({ bookings: confirmed });
-  } catch (err: any) {
+    // Paid bookings for today's shows, newest first, for the gate quick-check list
+    const bookings = await db.getPaidBookingsForShowDate(istDateString(), 50);
+
+    const response = NextResponse.json({ bookings });
+    response.headers.set('Cache-Control', 'no-store');
+    return response;
+  } catch (err) {
     console.error('Error fetching counter bookings:', err);
-    return NextResponse.json({ error: err.message || 'Failed to load bookings' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to load bookings' }, { status: 500 });
   }
 }

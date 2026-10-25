@@ -1,201 +1,86 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { db, isMockMode } from '@/lib/db';
-import { createClient } from '@supabase/supabase-js';
-import Razorpay from 'razorpay';
-import { sendBookingTicketEmail } from '@/lib/mailer';
+import { settlePayment, toPaise } from '@/lib/payments';
 
+const HANDLED_EVENTS = new Set(['payment.captured', 'order.paid']);
 
+function signatureMatches(rawBody: string, signature: string, secret: string) {
+  const expected = Buffer.from(crypto.createHmac('sha256', secret).update(rawBody).digest('hex'));
+  const received = Buffer.from(signature);
+  return expected.length === received.length && crypto.timingSafeEqual(expected, received);
+}
 
 export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.text();
-    
-    // Check if client is executing in Mock Mode or if Razorpay is not configured
-    const isMockTrigger = req.headers.get('x-mock-payment') === 'true' && process.env.NODE_ENV !== 'production' && isMockMode;
-    const isRazorpayConfigured = !!process.env.RAZORPAY_WEBHOOK_SECRET;
+    const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-    if (process.env.NODE_ENV === 'production' && !isRazorpayConfigured) {
-      return NextResponse.json({ error: 'Razorpay webhook secret not configured in production' }, { status: 503 });
-    }
+    // ── Local development only: the mock payment gateway posts here ──
+    const isMockTrigger = req.headers.get('x-mock-payment') === 'true'
+      && process.env.NODE_ENV !== 'production'
+      && (isMockMode || !webhookSecret);
 
-    let eventId = '';
-    let orderId = '';
-    let paymentId = '';
-    let bookingId = '';
-
-    if (isMockMode || !isRazorpayConfigured || isMockTrigger) {
-      // ── MOCK WEBHOOK DESERIALIZATION ───────────────────────
+    if (isMockTrigger) {
       const body = JSON.parse(rawBody);
-      eventId = body.eventId || `evt_mock_${Math.random().toString(36).substring(2, 9)}`;
-      orderId = body.orderId;
-      paymentId = body.paymentId || `pay_mock_${Math.random().toString(36).substring(2, 9)}`;
-      bookingId = body.bookingId;
-    } else {
-      // ── LIVE SIGNATURE VERIFICATION ──────────────────────────
-      const signature = req.headers.get('x-razorpay-signature');
-      const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET!;
+      const booking = await db.getBookingById(String(body.bookingId || ''));
+      if (!booking) return NextResponse.json({ error: 'Booking not found' }, { status: 404 });
 
-      if (!signature) {
-        return NextResponse.json({ error: 'Missing signature header' }, { status: 400 });
-      }
-
-      const expectedSignature = crypto
-        .createHmac('sha256', webhookSecret)
-        .update(rawBody)
-        .digest('hex');
-
-      if (expectedSignature !== signature) {
-        return NextResponse.json({ error: 'Invalid signature verification failed' }, { status: 400 });
-      }
-
-      // Parse payload
-      const event = JSON.parse(rawBody);
-      eventId = event.id;
-
-      if (event.event === 'order.paid' || event.event === 'payment.captured') {
-        const paymentEntity = event.payload.payment?.entity;
-        const orderEntity = event.payload.order?.entity;
-
-        orderId = orderEntity?.id || paymentEntity?.order_id;
-        paymentId = paymentEntity?.id;
-        bookingId = orderEntity?.notes?.bookingId || paymentEntity?.notes?.bookingId;
-      } else {
-        // Event type we don't handle
-        return NextResponse.json({ received: true });
-      }
+      const status = await settlePayment(booking, {
+        id: body.paymentId || `pay_mock_${crypto.randomBytes(5).toString('hex')}`,
+        order_id: booking.razorpay_order_id || '',
+        status: 'captured',
+        amount: toPaise(booking.total_amount),
+        currency: 'INR',
+      }, 'mock');
+      return NextResponse.json({ received: true, status });
     }
 
-    const isSupabaseConfigured = 
-      !!process.env.NEXT_PUBLIC_SUPABASE_URL && 
-      (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-
-    // Fallback: if notes didn't carry the bookingId but we have the Razorpay
-    // order id, resolve the booking from the DB (notes can be absent/edited).
-    if (!bookingId && orderId && isSupabaseConfigured) {
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-      const { data: byOrder } = await supabase
-        .from('bookings')
-        .select('id')
-        .eq('razorpay_order_id', orderId)
-        .maybeSingle();
-      if (byOrder) bookingId = byOrder.id;
+    if (!webhookSecret) {
+      return NextResponse.json({ error: 'Razorpay webhook secret not configured' }, { status: 503 });
     }
 
-    if (!bookingId) {
-      return NextResponse.json({ error: 'Missing bookingId notes' }, { status: 400 });
+    // ── Live Razorpay webhook ──
+    const signature = req.headers.get('x-razorpay-signature');
+    if (!signature || !signatureMatches(rawBody, signature, webhookSecret)) {
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
     }
 
-    // ── ATOMIC IDEMPOTENCY GUARD ──────────────────────────────
-    // Check if this webhook event was already processed
-    if (isSupabaseConfigured) {
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
+    // Razorpay sends the event id in a header, not in the body
+    const eventId = req.headers.get('x-razorpay-event-id')
+      || `body_${crypto.createHash('sha256').update(rawBody).digest('hex')}`;
 
-      // Insert eventId. Due to primary key constraint, duplicate events fail automatically (race prevention)
-      const { error: eventErr } = await supabase
-        .from('processed_webhook_events')
-        .insert({ razorpay_event_id: eventId });
-
-      if (eventErr) {
-        // Already processed
-        console.log(`Webhook event ${eventId} already processed.`);
-        return NextResponse.json({ received: true, duplicate: true });
-      }
+    if (await db.hasProcessedWebhookEvent(eventId)) {
+      return NextResponse.json({ received: true, duplicate: true });
     }
 
-    // ── DATABASE CONCURRENCY RESOLUTION ───────────────────────
-    // 1. Fetch booking record
-    const booking = await db.getBookingById(bookingId);
+    const event = JSON.parse(rawBody);
+    if (!HANDLED_EVENTS.has(event.event)) {
+      return NextResponse.json({ received: true, ignored: event.event });
+    }
+
+    const payment = event.payload?.payment?.entity;
+    if (!payment?.id || !payment?.order_id) {
+      return NextResponse.json({ received: true, ignored: 'no payment entity' });
+    }
+
+    // The booking is found by OUR order id only. Payment notes are set by the
+    // payer's browser and are never trusted.
+    const booking = await db.getBookingByOrderId(payment.order_id);
     if (!booking) {
-      return NextResponse.json({ error: 'Booking order not found' }, { status: 404 });
+      console.warn(`Webhook for unknown order ${payment.order_id} (payment ${payment.id})`);
+      await db.recordWebhookEvent(eventId);
+      return NextResponse.json({ received: true, ignored: 'unknown order' });
     }
 
-    // If already finalized
-    if (booking.payment_status === 'paid') {
-      sendBookingTicketEmail(booking.id).catch(err => console.error('Error sending ticket email on duplicate webhook:', err));
-      return NextResponse.json({ received: true, status: 'already_paid' });
-    }
+    const status = await settlePayment(booking, payment, 'webhook');
 
-    // Retrieve seat layout IDs from the booking seats relation
-    const seatLayoutIds = booking.booking_seats?.map(bs => bs.seat_layout_id) || [];
-
-    // 2. Perform atomic database lock check (moving seat_status status: locked -> booked)
-    // If locks expired, confirmBooking returns false
-    const success = await db.confirmBooking(booking.id, booking.show_id, seatLayoutIds, booking.booked_by);
-
-    if (success) {
-      // Confirm success: generate secure QR Code ticket validation token
-      const qrToken = `tkt_${booking.id}_${crypto.randomBytes(8).toString('hex')}`;
-      
-      // Finalize paid ticket booking (idempotent — safe against webhook retries)
-      await db.finalizeBooking(booking.id, paymentId, qrToken);
-      
-      // Audit log success
-      await db.logAudit(booking.booked_by, 'PAYMENT_CAPTURE_SUCCESS', { 
-        bookingId: booking.id, 
-        orderId, 
-        paymentId,
-        amount: booking.total_amount
-      });
-
-      // Send ticket confirmation email
-      sendBookingTicketEmail(booking.id).catch(emailErr => {
-        console.error('Failed to send confirmation email on webhook:', emailErr);
-      });
-
-      return NextResponse.json({ received: true, status: 'confirmed' });
-    } else {
-      // ── CONCURRENCY EXPIRED SEAT LOCK FAILURE (REFUND FLOW) ──
-      // This occurs if the customer pays after the 6 minute threshold, when seat sweeps unlocked the seats.
-      await db.updateBookingStatus(booking.id, 'failed');
-      
-      // Log critical conflict
-      await db.logAudit(booking.booked_by, 'PAYMENT_CAPTURE_CONFLICT_HOLD_EXPIRED', {
-        bookingId: booking.id,
-        orderId,
-        paymentId,
-        note: 'Seats were swept/released before payment capture completed. Automatic refund flagged.'
-      });
-
-      // Trigger automatic refund (In mock mode, log. In live mode, we can hit Razorpay refund APIs)
-      console.warn(`CRITICAL: Seat hold expired for booking ${booking.id}. Payment ${paymentId} requires refund.`);
-      
-      if (!isMockMode && isRazorpayConfigured) {
-        try {
-          const razorpay = new Razorpay({
-            key_id: process.env.RAZORPAY_KEY_ID!,
-            key_secret: process.env.RAZORPAY_KEY_SECRET!
-          });
-          
-          await razorpay.payments.refund(paymentId, {
-            amount: Math.round(Number(booking.total_amount) * 100),
-            notes: {
-              reason: 'Seat lock hold expired before checkout completion.',
-              bookingId: booking.id
-            }
-          });
-          
-          await db.updateBookingStatus(booking.id, 'refunded');
-          await db.logAudit(booking.booked_by, 'PAYMENT_REFUND_AUTO_TRIGGERED', {
-            bookingId: booking.id,
-            paymentId
-          });
-        } catch (refundErr) {
-          console.error(`Refund failed for payment ${paymentId}:`, refundErr);
-        }
-      }
-
-      return NextResponse.json({ received: true, status: 'conflict_expired_hold_refunded' });
-    }
-
-  } catch (err: any) {
+    // Recorded only after the work succeeded, so a failure is retried by Razorpay
+    await db.recordWebhookEvent(eventId);
+    return NextResponse.json({ received: true, status });
+  } catch (err) {
     console.error('Webhook execution error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    // 500 makes Razorpay retry the delivery
+    return NextResponse.json({ error: 'Webhook processing failed' }, { status: 500 });
   }
 }

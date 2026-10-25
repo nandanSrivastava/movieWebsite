@@ -1,24 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
+/**
+ * Public seat map: seat id + available/locked/booked, nothing about who holds
+ * or bought a seat. Identical for every viewer, so the CDN serves it for a few
+ * seconds and hundreds of open seat maps cost about one database read per show.
+ */
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const showId = searchParams.get('showId');
-
-    if (!showId) {
+    const showId = req.nextUrl.searchParams.get('showId');
+    if (!showId || showId.length > 100) {
       return NextResponse.json({ error: 'Missing showId parameter' }, { status: 400 });
     }
 
-    const seats = await db.getSeatsForShow(showId);
+    const seats = await db.getSeatAvailability(showId);
 
-    // Disable caching so clients always read fresh data
     const response = NextResponse.json({ seats });
-    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    
+    response.headers.set('Cache-Control', 'public, max-age=0, s-maxage=3, stale-while-revalidate=5');
     return response;
-  } catch (err: any) {
+  } catch (err) {
     console.error('Seat status retrieval error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Seat map unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }
 }

@@ -1,118 +1,68 @@
 'use client';
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import MovieCard from './MovieCard';
+import LanguageFilter from './LanguageFilter';
+import { languageOptions, matchesLanguage } from '../utils/languages';
+import styles from './MovieCarousel.module.css';
 
+// Home page "Now showing" row. Moves only when the person scrolls or presses
+// an arrow: a row that slides by itself fights the thumb on a phone.
 export default function MovieCarousel({ movies }: { movies: any[] }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [isHovered, setIsHovered] = useState(false);
+  const scrollRef = useRef<HTMLUListElement>(null);
+  const [lang, setLang] = useState<string | null>(null);
+  const [edges, setEdges] = useState({ start: true, end: false });
+
+  const options = languageOptions(movies);
+  const visible = movies.filter(m => matchesLanguage(m, lang));
+
+  const updateEdges = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setEdges({ start: el.scrollLeft < 8, end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 8 });
+  }, []);
 
   useEffect(() => {
-    if (isHovered) return;
+    updateEdges();
+    scrollRef.current?.scrollTo({ left: 0 });
+  }, [lang, updateEdges]);
 
-    const intervalId = setInterval(() => {
-      if (scrollRef.current) {
-        const { current } = scrollRef;
-        const scrollAmount = current.clientWidth * 0.8;
-        // If we've reached the end, scroll back to start
-        if (current.scrollLeft + current.clientWidth >= current.scrollWidth - 10) {
-          current.scrollTo({ left: 0, behavior: 'smooth' });
-        } else {
-          current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
-        }
-      }
-    }, 4000);
-
-    return () => clearInterval(intervalId);
-  }, [isHovered]);
-
-  const scroll = (direction: 'left' | 'right') => {
-    if (scrollRef.current) {
-      const { current } = scrollRef;
-      const scrollAmount = current.clientWidth * 0.8;
-      current.scrollBy({
-        left: direction === 'left' ? -scrollAmount : scrollAmount,
-        behavior: 'smooth'
-      });
-    }
+  const scroll = (direction: -1 | 1) => {
+    const el = scrollRef.current;
+    if (el) el.scrollBy({ left: direction * el.clientWidth * 0.8, behavior: 'smooth' });
   };
 
   return (
-    <div 
-      style={{ position: 'relative' }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
-      <button 
-        onClick={() => scroll('left')}
-        className="hidden sm:flex"
-        style={{
-          position: 'absolute',
-          left: '10px',
-          top: '40%',
-          transform: 'translateY(-50%)',
-          zIndex: 10,
-          background: 'rgba(0,0,0,0.6)',
-          color: 'white',
-          border: '1px solid rgba(255,255,255,0.2)',
-          borderRadius: '50%',
-          width: '40px',
-          height: '40px',
-          cursor: 'pointer',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '20px',
-          backdropFilter: 'blur(4px)'
-        }}
-      >
-        ←
-      </button>
+    <div className={styles.wrap}>
+      <LanguageFilter options={options} value={lang} onChange={setLang} />
 
-      <div className="rail-track" ref={scrollRef}>
-        {movies.map((movie) => (
-          <Link key={movie.id} href={`/movies/${movie.id}`} className="premium-poster">
-            <div className="poster-image-wrap">
-              <Image src={movie.poster_url} alt={movie.title} fill sizes="(max-width: 768px) 100vw, 33vw" style={{ objectFit: 'cover' }} />
-              <div className="poster-overlay">
-                <span className="book-now-badge">Book Tickets</span>
-              </div>
-            </div>
-            <div className="poster-info">
-              <h3 className="poster-title">{movie.title}</h3>
-              <div className="poster-meta">
-                <span className="poster-cert">{movie.certification}</span>
-                <span>{movie.genre?.split(',')[0]?.trim()}</span>
-              </div>
-            </div>
-          </Link>
-        ))}
-      </div>
+      {visible.length === 0 ? (
+        <p className={styles.empty}>
+          No {lang} films right now. <button type="button" className={styles.reset} onClick={() => setLang(null)}>Show all movies</button>
+        </p>
+      ) : (
+        <div className={styles.rail}>
+          <button type="button" className={`${styles.arrow} ${styles.prev}`} onClick={() => scroll(-1)} disabled={edges.start} aria-label="Scroll movies left">
+            <ChevronLeft aria-hidden />
+          </button>
+          <ul className={styles.track} ref={scrollRef} onScroll={updateEdges}>
+            {visible.map((movie, i) => (
+              <li key={movie.id} className={styles.item}>
+                <MovieCard movie={movie} priority={i < 2} />
+              </li>
+            ))}
+          </ul>
+          <button type="button" className={`${styles.arrow} ${styles.next}`} onClick={() => scroll(1)} disabled={edges.end} aria-label="Scroll movies right">
+            <ChevronRight aria-hidden />
+          </button>
+        </div>
+      )}
 
-      <button 
-        onClick={() => scroll('right')}
-        className="hidden sm:flex"
-        style={{
-          position: 'absolute',
-          right: '10px',
-          top: '40%',
-          transform: 'translateY(-50%)',
-          zIndex: 10,
-          background: 'rgba(0,0,0,0.6)',
-          color: 'white',
-          border: '1px solid rgba(255,255,255,0.2)',
-          borderRadius: '50%',
-          width: '40px',
-          height: '40px',
-          cursor: 'pointer',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '20px',
-          backdropFilter: 'blur(4px)'
-        }}
-      >
-        →
-      </button>
+      <Link href={lang ? `/movies?lang=${encodeURIComponent(lang)}` : '/movies'} className={`btn btn-quiet ${styles.all}`}>
+        See all movies
+      </Link>
     </div>
   );
 }
