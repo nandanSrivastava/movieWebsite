@@ -1,8 +1,9 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { supabase as supabaseClient } from '@/lib/supabaseClient';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { isMockMode } from '@/lib/config';
+import { browserHasSession } from '@/lib/sessionCookie';
 
 // Define the unified user profile shape
 export interface AuthUser {
@@ -16,6 +17,9 @@ export interface AuthUser {
 interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
+  /** Couldn't reach the sign-in service or profile. Not the same as being signed out. */
+  sessionCheckFailed: boolean;
+  retrySessionCheck: () => void;
   isMock: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, fullName: string, phone: string) => Promise<{ needsEmailConfirmation: boolean }>;
@@ -51,16 +55,50 @@ function deleteCookie(name: string) {
   document.cookie = name + '=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
 }
 
+// Every cookie the Supabase session is stored in
+function clearSessionCookies() {
+  if (typeof document === 'undefined') return;
+  document.cookie.split(';')
+    .map(cookie => cookie.split('=')[0].trim())
+    .filter(name => name.startsWith('sb-'))
+    .forEach(deleteCookie);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [sessionCheckFailed, setSessionCheckFailed] = useState(false);
+  const userRef = useRef<AuthUser | null>(null);
+  useEffect(() => { userRef.current = user; }, [user]);
 
-  // Use the module-level singleton (prevents multiple GoTrueClient instances)
-  const supabase = !isMockMode ? supabaseClient : null;
+  // Supabase's library is about a quarter of a page's scripts and a guest never
+  // uses it, so it loads only for someone signed in or signing in. Loaded once:
+  // the module holds a singleton, which prevents multiple GoTrueClient instances.
+  const clientPromise = useRef<Promise<SupabaseClient> | null>(null);
+  const refreshSessionRef = useRef<() => void>(() => {});
+  const getClient = useCallback((): Promise<SupabaseClient> => {
+    clientPromise.current ??= import('@/lib/supabaseClient')
+      .then(({ supabase }) => {
+        supabase.auth.onAuthStateChange((event) => {
+          if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+            refreshSessionRef.current();
+          }
+        });
+        return supabase as unknown as SupabaseClient;
+      })
+      .catch((err) => {
+        clientPromise.current = null; // A dropped connection: try again next time
+        throw err;
+      });
+    return clientPromise.current;
+  }, []);
 
   // ── LOAD USER SESSION ────────────────────────────────────────
   const refreshSession = useCallback(async () => {
-    setLoading(true);
+    // supabase-js re-checks the session each time a tab regains focus. For someone
+    // already signed in, that has to happen quietly: flipping `loading` swapped the
+    // gate screen for a spinner and lost the camera and half-typed forms.
+    if (!userRef.current) setLoading(true);
     try {
       if (isMockMode) {
         const mockSession = getCookie('cinebook_mock_session');
@@ -69,7 +107,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setUser(null);
         }
-      } else if (supabase) {
+      } else if (!browserHasSession()) {
+        // Nobody is signed in on this browser, so there's nothing to ask Supabase
+        setUser(null);
+        deleteCookie('sb-active-session');
+        setSessionCheckFailed(false);
+      } else {
+        const supabase = await getClient();
         const { data: { session }, error: sessionErr } = await supabase.auth.getSession();
         if (sessionErr) throw sessionErr;
 
@@ -93,34 +137,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
           // Sync session to cookie so next.js middleware path checks pass
           setCookie('sb-active-session', 'true', 86400);
+          setSessionCheckFailed(false);
         } else {
+          setSessionCheckFailed(false);
           setUser(null);
           deleteCookie('sb-active-session');
         }
       }
     } catch (err) {
+      // A bad network isn't a sign-out. Whoever was signed in stays signed in.
       console.error('Error refreshing session:', err);
-      setUser(null);
-      deleteCookie('sb-active-session');
+      if (!userRef.current) setSessionCheckFailed(true);
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, [getClient]);
 
   useEffect(() => {
+    refreshSessionRef.current = refreshSession;
     refreshSession();
+    if (isMockMode) return;
 
-    if (!isMockMode && supabase) {
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event) => {
-        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
-          refreshSession();
-        }
-      });
-      return () => {
-        subscription.unsubscribe();
-      };
-    }
-  }, [refreshSession, supabase]);
+    // Signed in from another tab: this one hasn't loaded the library, so nothing would tell it
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && !clientPromise.current && browserHasSession()) refreshSession();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [refreshSession]);
 
   // ── USER SIGN IN ─────────────────────────────────────────────
   const signIn = async (email: string, password: string) => {
@@ -169,7 +213,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const newUser: AuthUser = { id, email, full_name: name, phone, role };
         setCookie('cinebook_mock_session', JSON.stringify(newUser), 86400); // 1 day
         setUser(newUser);
-      } else if (supabase) {
+      } else {
+        const supabase = await getClient();
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         // ⚠️  Do NOT call refreshSession() here.
@@ -190,7 +235,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const newUser: AuthUser = { id, email, full_name: fullName, phone, role: 'user' };
         setCookie('cinebook_mock_session', JSON.stringify(newUser), 86400);
         setUser(newUser);
-      } else if (supabase) {
+      } else {
+        const supabase = await getClient();
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
@@ -222,8 +268,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isMockMode) {
         deleteCookie('cinebook_mock_session');
         setUser(null);
-      } else if (supabase) {
-        await supabase.auth.signOut();
+      } else {
+        const supabase = await getClient();
+        // Seats they held shouldn't stay locked under an account they've left
+        try {
+          const { data } = await supabase.auth.getSession();
+          await fetch('/api/seats/unlock', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(data.session?.access_token ? { Authorization: `Bearer ${data.session.access_token}` } : {}),
+            },
+            body: JSON.stringify({ all: true }),
+          });
+        } catch {
+          // Offline: the holds run out on their own
+        }
+        // This device only: a cashier leaving one phone mustn't end the box office's session.
+        const { error } = await supabase.auth.signOut({ scope: 'local' });
+        // Offline the library keeps the session, but a shared phone must still end up signed out
+        if (error) clearSessionCookies();
         setUser(null);
         deleteCookie('sb-active-session');
       }
@@ -271,6 +335,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         loading,
+        sessionCheckFailed,
+        retrySessionCheck: refreshSession,
         isMock: isMockMode,
         signIn,
         signUp,

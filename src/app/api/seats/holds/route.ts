@@ -16,12 +16,18 @@ export async function GET(req: NextRequest) {
   try {
     const { owner } = await getHoldOwner(req, false);
     const holds = owner ? await db.getSeatHolds(showId, owner) : [];
+    // Seconds, not a time: this phone's clock may be wrong
+    const firstExpiry = holds.map(h => h.lock_expires_at).filter((t): t is string => !!t).sort()[0];
     return NextResponse.json(
-      { seatLayoutIds: holds.map(h => h.seat_layout_id) },
+      {
+        seatLayoutIds: holds.map(h => h.seat_layout_id),
+        holdSecondsLeft: firstExpiry ? Math.max(0, Math.floor((new Date(firstExpiry).getTime() - Date.now()) / 1000)) : 0,
+      },
       { headers: { 'Cache-Control': 'private, no-store' } }
     );
   } catch (err) {
     console.error('Seat holds API error:', err);
-    return NextResponse.json({ seatLayoutIds: [] }, { headers: { 'Cache-Control': 'private, no-store' } });
+    // Not "no holds": the caller mustn't drop seats because this lookup failed
+    return NextResponse.json({ error: 'Could not check seat holds' }, { status: 503, headers: { 'Cache-Control': 'no-store' } });
   }
 }

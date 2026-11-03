@@ -19,7 +19,7 @@ export interface Movie {
   certification: string;
   poster_url: string;
   trailer_url: string;
-  is_featured: boolean;
+  is_featured?: boolean;
   is_active: boolean;
   created_at: string;
 }
@@ -48,6 +48,7 @@ export interface Show {
   price_classic: number;   // ₹150
   price_premium: number;   // ₹200 
   created_at: string;
+  cancelled_at?: string | null;
   // Joins
   movie?: Movie;
   screen?: Screen;
@@ -82,6 +83,8 @@ export interface Booking {
   qr_code_token: string | null;
   created_at: string;
   checked_in_at?: string | null;
+  /** How many of its seats have come through the gate. checked_in_at is set once all have. */
+  admitted_seats?: number;
   checked_in_by?: string | null;
   hold_owner?: string | null;
   access_key?: string;
@@ -89,14 +92,24 @@ export interface Booking {
   refund_reason?: string | null;
   razorpay_refund_id?: string | null;
   ticket_email_sent_at?: string | null;
+  superseded_at?: string | null;
   // Joins
   show?: Show;
   booking_seats?: { seat_layout_id: string; price: number; seat_layout?: SeatLayout }[];
 }
 
 // Seat-hold and payment outcomes returned by the database functions
-export type LockResult = 'ok' | 'taken' | 'owner_cap' | 'ip_cap' | 'show_started' | 'invalid';
+export type LockResult = 'ok' | 'taken' | 'hold_limit' | 'ip_cap' | 'show_started' | 'invalid';
 export type FinalizeResult = 'confirmed' | 'already_paid' | 'refunding' | 'conflict' | 'not_found';
+
+// Ticket emails retry on every reconcile run (5 min apart) for about two hours
+export const MAX_TICKET_EMAIL_ATTEMPTS = 24;
+
+export interface CancelShowResult {
+  status: 'deleted' | 'cancelled' | 'already_started' | 'not_found';
+  onlineRefunds: number;
+  cashRefunds: number;
+}
 
 // Public seat-map state: no holder ids, no booking ids
 export interface PendingBookingResult {
@@ -150,6 +163,7 @@ export interface DatabaseClient {
   
   // Catalog
   getMovies(): Promise<Movie[]>;
+  getAllMovies(): Promise<Movie[]>;
   getMovieById(id: string): Promise<Movie | null>;
   createMovie(movie: Omit<Movie, 'id' | 'created_at'>): Promise<Movie>;
   updateMovie(id: string, movie: Partial<Movie>): Promise<Movie>;
@@ -160,9 +174,10 @@ export interface DatabaseClient {
   getShows(fromDate?: string): Promise<Show[]>;
   getShowsForDate(date: string): Promise<Show[]>;
   getShowsForMovie(movieId: string): Promise<Show[]>;
+  getShowsForScreen(screenId: string, fromDate: string, toDate: string): Promise<Show[]>;
   getShowById(id: string): Promise<Show | null>;
   createShow(show: Omit<Show, 'id' | 'created_at'>): Promise<Show>;
-  deleteShow(id: string): Promise<boolean>;
+  cancelShow(id: string): Promise<CancelShowResult>;
   
   // Seat State
   getSeatsForShow(showId: string): Promise<SeatStatus[]>;
@@ -170,7 +185,9 @@ export interface DatabaseClient {
   getSeatHolds(showId: string, owner: string): Promise<SeatHold[]>;
   lockSeats(showId: string, seatLayoutIds: string[], owner: string, clientIp: string | null): Promise<LockResult>;
   extendSeatHolds(showId: string, seatLayoutIds: string[], owner: string, seconds: number): Promise<string | null>;
-  releaseSeatHolds(showId: string, seatLayoutIds: string[], owner: string): Promise<void>;
+  // A null seat list means all the owner's seats on the show; a null show means every show
+  releaseSeatHolds(showId: string | null, seatLayoutIds: string[] | null, owner: string): Promise<void>;
+  adoptGuestHolds(guestId: string, userId: string): Promise<void>;
   forceReleaseSeatHolds(showId: string, seatLayoutIds: string[]): Promise<void>;
   getActiveLocks(): Promise<ActiveLock[]>;
   getShowOccupancy(showIds: string[]): Promise<Record<string, { total: number; booked: number }>>;
@@ -190,7 +207,12 @@ export interface DatabaseClient {
     idempotencyKey: string;
     holdSeconds: number;
   }): Promise<PendingBookingResult>;
-  setBookingOrderId(bookingId: string, orderId: string): Promise<void>;
+  // First writer wins: returns the order every caller must use
+  setBookingOrderId(bookingId: string, orderId: string): Promise<string>;
+  // This customer's latest attempt on exactly these seats, whatever became of it
+  findHolderBooking(showId: string, seatLayoutIds: string[], owners: string[]): Promise<Booking | null>;
+  // Tickets bought from this browser or account for shows that haven't ended
+  findHolderTickets(owners: string[], limit: number): Promise<Booking[]>;
   getBookingById(id: string): Promise<Booking | null>;
   getBookingByOrderId(orderId: string): Promise<Booking | null>;
   getBookingsByUser(userId: string): Promise<Booking[]>;
@@ -202,25 +224,34 @@ export interface DatabaseClient {
   queueRefund(bookingId: string, paymentId: string, reason: string): Promise<boolean>;
   claimRefund(bookingId: string): Promise<Booking | null>;
   completeRefund(bookingId: string, refundId: string | null): Promise<void>;
+  recordExternalRefund(bookingId: string, paymentId: string, refundId: string | null): Promise<'refunded' | 'ignored'>;
   getPendingOnlineBookings(olderThanSeconds: number, limit: number): Promise<Booking[]>;
   getRefundPendingBookings(limit: number): Promise<Booking[]>;
   hasProcessedWebhookEvent(eventId: string): Promise<boolean>;
   recordWebhookEvent(eventId: string): Promise<void>;
 
-  // Ticket email outbox
-  claimTicketEmail(bookingId: string): Promise<boolean>;
+  // Ticket email outbox. A claim returns the attempt number, or null if not due.
+  claimTicketEmail(bookingId: string): Promise<number | null>;
   markTicketEmailSent(bookingId: string): Promise<void>;
   getUnsentTicketEmailBookings(limit: number): Promise<Booking[]>;
+
+  // Refund notice outbox
+  claimRefundEmail(bookingId: string): Promise<boolean>;
+  releaseRefundEmail(bookingId: string): Promise<void>;
+  getUnsentRefundEmailBookings(limit: number): Promise<Booking[]>;
 
   // Gate verification
   getBookingByQrToken(token: string): Promise<Booking | null>;
   searchPaidBookings(query: { phoneDigits: string } | { name: string }, limit: number): Promise<Booking[]>;
   getPaidBookingsForShowDate(showDate: string, limit: number): Promise<Booking[]>;
-  checkInBooking(bookingId: string, staffId: string | null): Promise<boolean>;
+  /** Admits `count` people, or everyone not yet in. Returns how many went in; 0 means nobody was left. */
+  checkInBooking(bookingId: string, staffId: string | null, count?: number): Promise<number>;
+  undoCheckIn(bookingId: string): Promise<boolean>;
 
   // Limits & reporting
   rateLimitHit(key: string, windowSeconds: number, limit: number): Promise<boolean>;
   getSalesSummary(): Promise<SalesSummary>;
+  getBookingsForShowDate(showDate: string): Promise<Booking[]>;
 
   // Profiles & Onboarding
   getProfile(id: string): Promise<Profile | null>;

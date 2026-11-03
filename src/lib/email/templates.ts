@@ -3,6 +3,8 @@
 // Every user-supplied value MUST go through escapeHtml() before being
 // interpolated — customer names and notes are attacker-controlled.
 
+import { isCounterRefund, refundReasonText } from '@/features/shared/utils/refundReasons';
+
 /** Escape a string for safe interpolation into HTML. */
 export function escapeHtml(value: string | number | null | undefined): string {
   return String(value ?? '')
@@ -286,6 +288,53 @@ export function ticketConfirmationEmail(data: TicketEmailData): string {
   </table>
 </body>
 </html>`;
+}
+
+/** Plain-text copy of the ticket, for mail apps that don't show HTML. */
+export function ticketConfirmationText(data: TicketEmailData): string {
+  return [
+    `Hi ${data.customerName || 'there'}, your seats are confirmed at ${THEATER_NAME}.`,
+    '',
+    `Movie: ${data.movieTitle}`,
+    `Date: ${data.showDate}`,
+    `Time: ${data.showTime}`,
+    `Seats: ${data.seats}`,
+    `Hall: ${data.screenName}`,
+    `Amount: Rs ${data.totalAmount}`,
+    `Booking ID: ${data.bookingId}`,
+    '',
+    data.ticketUrl ? `Your ticket and QR code: ${data.ticketUrl}` : 'Show this booking ID at the entrance.',
+  ].join('\n');
+}
+
+/** Tells a customer their money went back, and why. */
+export function refundEmail(data: {
+  customerName: string | null;
+  movieTitle: string;
+  showDate: string;
+  showTime: string;
+  seats: string;
+  amount: number;
+  reason: string | null;
+}): string {
+  const whereMoneyGoes = isCounterRefund(data.reason)
+    ? 'Please bring this email or your phone number to the counter.'
+    : 'It goes back to the way you paid. Banks usually show it within 5–7 working days.';
+  const body = `
+    <div style="text-align:center;margin-bottom:20px;">
+      <div style="font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#f59e0b;font-weight:bold;">Refund</div>
+      <h2 style="margin:10px 0 4px;font-size:22px;">Hi ${escapeHtml(data.customerName || 'there')},</h2>
+      <p style="margin:8px 0 0;color:#cbd5e1;font-size:14px;line-height:1.6;">${escapeHtml(refundReasonText(data.reason))}</p>
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#cbd5e1;line-height:1.8;">
+      <tr><td>Movie</td><td align="right" style="color:#ffffff;">${escapeHtml(data.movieTitle)}</td></tr>
+      <tr><td>Show</td><td align="right" style="color:#ffffff;">${escapeHtml(data.showDate)} · ${escapeHtml(data.showTime)}</td></tr>
+      <tr><td>Seats</td><td align="right" style="color:#ffffff;">${escapeHtml(data.seats)}</td></tr>
+      <tr><td>Amount</td><td align="right" style="color:#ffffff;font-weight:bold;">Rs ${escapeHtml(data.amount)}</td></tr>
+    </table>
+    <p style="font-size:13px;color:#9ca3af;margin-top:20px;">${escapeHtml(whereMoneyGoes)}</p>
+  `;
+  return baseLayout(body);
 }
 
 /** Welcome / onboarding email — fire after successful signup. */

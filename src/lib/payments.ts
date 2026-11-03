@@ -2,11 +2,11 @@ import 'server-only';
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
 import { db } from './db';
-import { queueTicketEmail } from './mailer';
+import { queueRefundEmail, queueTicketEmail, sendExtraPaymentRefundEmail } from './mailer';
 import type { Booking } from './types';
 
 // How long an online booking may wait for a payment before it's abandoned.
-// Covers the seat hold (max 20 min) plus slow UPI approvals.
+// Covers the seat hold (max 25 min, see hold_limit_at) plus slow UPI approvals.
 const ABANDON_AFTER_MS = 45 * 60 * 1000;
 
 export const isRazorpayConfigured = () => !!process.env.RAZORPAY_KEY_ID && !!process.env.RAZORPAY_KEY_SECRET;
@@ -70,8 +70,11 @@ export async function settlePayment(
       queueTicketEmail(booking.id);
       return 'confirmed';
     case 'already_paid':
+      await refundIfExtraPayment(booking.id, payment, source);
       return 'already_paid';
     case 'refunding':
+      // This booking's money is going back already. A different payment on it must too.
+      await refundIfExtraPayment(booking.id, payment, source);
       return 'refund_queued';
     case 'conflict':
       // Seats went to someone else before this payment arrived
@@ -83,6 +86,28 @@ export async function settlePayment(
     default:
       return 'ignored';
   }
+}
+
+/**
+ * A booking keeps the payment that confirmed it. Any other captured payment on
+ * it (a late UPI approval after a retry, or a cash sale while an online window
+ * was still open) is money the customer shouldn't have paid, so it goes back.
+ * Throws if the refund fails, so a webhook delivery is retried.
+ */
+async function refundIfExtraPayment(bookingId: string, payment: VerifiedPayment, source: string) {
+  const booking = await db.getBookingById(bookingId);
+  if (!booking?.razorpay_payment_id || booking.razorpay_payment_id === payment.id) return;
+  if (!isRazorpayConfigured() || payment.id.startsWith('pay_mock_')) return;
+
+  const rz = getRazorpay();
+  const current: any = await rz.payments.fetch(payment.id);
+  const due = Number(current.amount) - Number(current.amount_refunded || 0);
+  if (due <= 0 || current.status !== 'captured') return;
+
+  await db.logAudit(booking.booked_by, 'PAYMENT_EXTRA_RECEIVED', { bookingId, paymentId: payment.id, amount: due, source });
+  const refund = await rz.payments.refund(payment.id, { amount: due, notes: { bookingId, reason: 'duplicate_payment' } });
+  await db.logAudit(booking.booked_by, 'PAYMENT_EXTRA_REFUNDED', { bookingId, paymentId: payment.id, refundId: refund.id, amount: due });
+  sendExtraPaymentRefundEmail(booking, due / 100);
 }
 
 /**
@@ -98,6 +123,7 @@ export async function processRefund(bookingId: string): Promise<'refunded' | 're
   if (!paymentId || paymentId.startsWith('pay_mock_') || !isRazorpayConfigured()) {
     if (db.isMock) {
       await db.completeRefund(bookingId, null);
+      queueRefundEmail(bookingId);
       return 'refunded';
     }
     console.error(`Refund for booking ${bookingId} can't run: no payment id or Razorpay keys`);
@@ -111,6 +137,7 @@ export async function processRefund(bookingId: string): Promise<'refunded' | 're
 
     if (due <= 0 || payment.status === 'refunded') {
       await db.completeRefund(bookingId, null);
+      queueRefundEmail(bookingId);
       return 'refunded';
     }
     if (payment.status !== 'captured') {
@@ -126,6 +153,7 @@ export async function processRefund(bookingId: string): Promise<'refunded' | 're
     });
     await db.completeRefund(bookingId, refund.id);
     await db.logAudit(booking.booked_by, 'PAYMENT_REFUNDED', { bookingId, paymentId, refundId: refund.id, amount: due });
+    queueRefundEmail(bookingId);
     return 'refunded';
   } catch (err: any) {
     console.error(`Refund failed for booking ${bookingId}:`, err);
@@ -169,4 +197,27 @@ export async function reconcilePendingBooking(booking: Booking): Promise<SettleO
 
   if (age > ABANDON_AFTER_MS && (await db.expirePendingBooking(booking.id))) return 'abandoned';
   return 'waiting';
+}
+
+/**
+ * Before showing a customer the Pay button again: did their earlier attempt on
+ * these seats actually go through? 'ticket' means there is a ticket or a refund
+ * to show them instead. A Razorpay failure must not stop a sale, so it counts
+ * as no news. The webhook and the reconcile job still catch up later.
+ */
+export async function checkEarlierAttempt(booking: Booking): Promise<'ticket' | 'pending' | 'none'> {
+  if (booking.payment_status === 'paid' || booking.payment_status === 'refund_pending' || booking.payment_status === 'refunded') {
+    return 'ticket';
+  }
+  if (booking.payment_status !== 'pending') return 'none';
+  if (!booking.razorpay_order_id) return 'none';
+
+  let outcome: Awaited<ReturnType<typeof reconcilePendingBooking>> = 'waiting';
+  try {
+    outcome = await reconcilePendingBooking(booking);
+  } catch (err) {
+    console.error(`Could not check the earlier payment for booking ${booking.id}:`, err);
+  }
+  if (outcome === 'confirmed' || outcome === 'already_paid' || outcome === 'refund_queued') return 'ticket';
+  return outcome === 'abandoned' ? 'none' : 'pending';
 }

@@ -18,9 +18,9 @@ function dateAtNoon(showDate: string): Date {
 }
 
 /** "Today", "Tomorrow", or "Sun, 25 Oct". */
-export function formatShowDay(showDate: string): string {
-  const today = istDateString();
-  const tomorrow = istDateString(new Date(Date.now() + 86_400_000));
+export function formatShowDay(showDate: string, now = Date.now()): string {
+  const today = istDateString(new Date(now));
+  const tomorrow = istDateString(new Date(now + 86_400_000));
   if (showDate === today) return 'Today';
   if (showDate === tomorrow) return 'Tomorrow';
   return dateAtNoon(showDate).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: IST });
@@ -50,12 +50,19 @@ export function formatShowTime(showTime: string): string {
   return `${hours % 12 || 12}:${m.slice(0, 2)} ${hours >= 12 ? 'PM' : 'AM'}`;
 }
 
-const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2, minimumFractionDigits: 0 });
+const inrWhole = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
+const inrPaise = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/** "₹1,050". */
+/** "₹1,050", or "₹150.50" when there are paise. */
 export function formatINR(amount: number | string | null | undefined): string {
   const n = Number(amount ?? 0);
-  return inr.format(Number.isFinite(n) ? n : 0);
+  if (!Number.isFinite(n)) return inrWhole.format(0);
+  return Number.isInteger(n) ? inrWhole.format(n) : inrPaise.format(n);
+}
+
+/** "5 November" for a stored YYYY-MM-DD. */
+export function formatDayMonth(date: string): string {
+  return dateAtNoon(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', timeZone: IST });
 }
 
 /** "2h 49m" from minutes. */

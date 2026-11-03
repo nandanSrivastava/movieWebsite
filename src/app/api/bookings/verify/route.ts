@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { getStaffUser } from '@/lib/requestAuth';
+import { ticketView } from '@/lib/bookingAccess';
+import { ticketFromScan } from '@/lib/ticketInput';
 
-const SEARCH_LIMIT = 10;
+const SEARCH_LIMIT = 25;
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,7 +14,7 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const input = (searchParams.get('token') || '').trim();
+    const input = ticketFromScan(searchParams.get('token') || '');
 
     if (!input) {
       return NextResponse.json({ error: 'Missing token parameter' }, { status: 400 });
@@ -31,7 +33,7 @@ export async function GET(req: NextRequest) {
           error: `Ticket payment is pending or incomplete. Current Status: ${booking.payment_status}`
         }, { status: 400 });
       }
-      return noStore({ verified: true, booking });
+      return noStore({ verified: true, booking: ticketView(booking) });
     }
 
     if (input.startsWith('tkt_')) {
@@ -49,19 +51,19 @@ export async function GET(req: NextRequest) {
       }
       // A full number may carry a 91 / 0 prefix; the last 10 digits are the subscriber number
       const phoneDigits = phoneCandidate.length > 10 ? phoneCandidate.slice(-10) : phoneCandidate;
-      matches = await db.searchPaidBookings({ phoneDigits }, SEARCH_LIMIT);
+      matches = await db.searchPaidBookings({ phoneDigits }, SEARCH_LIMIT + 1);
     } else {
       if (input.length < 3) {
         return NextResponse.json({ error: 'Enter at least 3 letters of the customer name.' }, { status: 400 });
       }
-      matches = await db.searchPaidBookings({ name: input }, SEARCH_LIMIT);
+      matches = await db.searchPaidBookings({ name: input }, SEARCH_LIMIT + 1);
     }
 
     if (matches.length === 0) {
       return NextResponse.json({ verified: false, error: 'No paid tickets match that phone number or name.' }, { status: 404 });
     }
 
-    return noStore({ matches });
+    return noStore({ matches: matches.slice(0, SEARCH_LIMIT).map(ticketView), hasMore: matches.length > SEARCH_LIMIT });
 
   } catch (err) {
     console.error('Verify booking API error:', err);

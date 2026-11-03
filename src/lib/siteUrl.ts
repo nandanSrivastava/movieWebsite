@@ -1,3 +1,7 @@
+// The canonical public address. The bare domain redirects here, so links, the
+// sitemap and search engines all use this one.
+export const PUBLIC_SITE_URL = 'https://www.dhrubcineplex.in';
+
 // Absolute base URL for links in emails and other places without a request.
 // Set NEXT_PUBLIC_SITE_URL to the public domain; on Vercel the production
 // domain is used automatically if it isn't set.

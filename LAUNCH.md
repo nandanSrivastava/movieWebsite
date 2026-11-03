@@ -11,7 +11,9 @@ Run in order. Details in [supabase/README.md](supabase/README.md).
 - [ ] `supabase/migrations/003_scheduled_jobs.sql` (replace `<APP_URL>` and `<CRON_SECRET>` first)
 - [ ] `supabase/migrations/004_abuse_and_performance.sql`
 - [ ] `supabase/migrations/005_profile_privacy.sql`
+- [ ] `supabase/migrations/006_payment_and_hold_fixes.sql` (**before** deploying the code that needs it; it stops with a clear message if an earlier migration is missing). Or set `SUPABASE_DB_URL` and `SUPABASE_DB_CA` (next section), and each production deploy runs this and every later migration by itself
 - [ ] Check the jobs: `SELECT jobname, schedule, active FROM cron.job;` shows three active jobs
+- [ ] Check where the reconcile job calls: `SELECT decrypted_secret FROM vault.decrypted_secrets WHERE name = 'app_url';` must be `https://www.dhrubcineplex.in`, with `www`: the bare domain redirects, and `dhrub-talkies.vercel.app` no longer answers. `SELECT status_code, created FROM net._http_response ORDER BY created DESC LIMIT 5;` should show 200s. If not, closed-tab payments aren't confirmed and failed refunds aren't retried. To fix it, run `003_scheduled_jobs.sql` again with the right `<APP_URL>`; it replaces the old value
 - [ ] Backups: Point-in-Time Recovery or daily backups on (Supabase Pro)
 
 ## 2. Environment variables (Vercel → Project → Settings → Environment Variables)
@@ -19,11 +21,12 @@ Run in order. Details in [supabase/README.md](supabase/README.md).
 | Variable | Notes |
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase project |
-| `SUPABASE_SERVICE_ROLE_KEY` | **Required.** Server only. The app refuses to start database calls without it |
+| `SUPABASE_SERVICE_ROLE_KEY` | **Required.** Server only. The app refuses to start database calls without it. Also signs the guest cookie, so changing it makes guests pick their seats again |
+| `SUPABASE_DB_URL`, `SUPABASE_DB_CA` | Production only. Let each production deploy run new migrations by itself. See [supabase/README.md](supabase/README.md) |
 | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` | `rzp_test_…` now, `rzp_live_…` at go-live |
 | `RAZORPAY_WEBHOOK_SECRET` | From the Razorpay webhook (step 3) |
 | `CRON_SECRET` | New. Random string (`openssl rand -hex 32`); same value as in migration 003 |
-| `NEXT_PUBLIC_SITE_URL` | New. Public address used in ticket-email links, e.g. `https://dhrubcineplex.in` |
+| `NEXT_PUBLIC_SITE_URL` | New. Public address used in ticket-email links, e.g. `https://www.dhrubcineplex.in` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | Use a transactional provider (Resend, Amazon SES, Postmark: all offer SMTP). Gmail stops at ~500 emails/day |
 | `SMTP_FROM` | Optional sender, e.g. `"Dhrub Cineplex" <tickets@dhrubcineplex.in>` |
 | `NEXT_PUBLIC_SENTRY_DSN` (+ `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT`) | Error reporting; without a DSN Sentry stays off |
@@ -32,7 +35,7 @@ Run in order. Details in [supabase/README.md](supabase/README.md).
 ## 3. Razorpay (test mode first)
 
 - [ ] Dashboard → Settings → **Payment capture: Automatic**
-- [ ] Dashboard → Webhooks → Add: URL `https://<your-domain>/api/checkout/webhook`, events **`payment.captured`** and **`order.paid`**, set a secret → `RAZORPAY_WEBHOOK_SECRET`
+- [ ] Dashboard → Webhooks → Add: URL `https://www.dhrubcineplex.in/api/checkout/webhook` (with `www`: the bare domain answers with a redirect), events **`payment.captured`**, **`order.paid`** and **`refund.processed`**, set a secret → `RAZORPAY_WEBHOOK_SECRET`
 - [ ] Redeploy so the new variables load
 
 ### Test-mode run-through (all must pass before going live)
@@ -43,6 +46,9 @@ Run in order. Details in [supabase/README.md](supabase/README.md).
 | UPI success | VPA `success@razorpay` | Same as above |
 | UPI failure | VPA `failure@razorpay` | Booking stays unpaid; seats free after the hold |
 | Customer closes the tab right after paying | Pay, close the tab before the ticket page loads | Within 5 minutes the booking is paid and the email arrives (reconcile job) |
+| Customer reopens after paying | Pay, close the tab, reopen the checkout address | Goes straight to the ticket |
+| Dashboard refund | Refund a paid booking in Razorpay | Ticket stops working at the gate, seat goes back on sale, customer gets an email |
+| Cancel a sold show | Admin → cancel a show with a paid booking | Refund goes out, customer gets an email |
 | Seats lost during payment | Hold seats, wait out the timer, book the same seats in another browser, then pay in the first | First payment is refunded automatically (Razorpay → Refunds) |
 | Gate | Scan the emailed QR at `/counter` → Admit | Admitted once; a second scan says "already used" |
 | Lost ticket | `/booking/lookup` with the phone number | Email with ticket links arrives; the page shows nothing about the booking |
@@ -54,6 +60,7 @@ Check `SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10;` sh
 - [ ] Auth → URL Configuration: Site URL = your domain; Redirect URLs include `https://<your-domain>/auth/callback**` (and the vercel.app URL)
 - [ ] Auth → SMTP: custom SMTP (the built-in mailer only reaches team addresses, so customer sign-up and password-reset emails won't arrive)
 - [ ] Try one real sign-up and one password reset
+- [ ] Auth → Email Templates: paste `supabase/email-templates/confirm-signup.html` into "Confirm signup" and `reset-password.html` into "Reset Password". Each file's first lines give the subject to use
 
 ## 5. Before every deploy
 
@@ -63,7 +70,8 @@ Check `SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10;` sh
 
 ## 6. Hosting
 
-- [ ] Vercel function region close to the Supabase region (e.g. `bom1` for Mumbai): Project → Settings → Functions
+- [ ] Vercel function region next to the Supabase region. `vercel.json` sets `syd1` because the database is in Sydney. If Supabase ever moves to Mumbai, change it to `bom1`
+- [ ] Uptime monitor on `https://www.dhrubcineplex.in/api/health?deep=1` (this one also checks the database; without `deep=1` it only proves the server is up)
 - [ ] Vercel **Hobby is for non-commercial use** and has low monthly limits; selling tickets needs **Pro**
 - [ ] Optional: run `scripts/load/seat-map.k6.js` against a staging deployment (never production)
 
@@ -71,7 +79,7 @@ Check `SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10;` sh
 
 1. Complete Razorpay account activation (KYC, settlement bank account).
 2. Switch the dashboard to **Live mode** → API Keys → generate live keys.
-3. Webhooks are separate per mode: add the **same webhook again in Live mode** (same URL, same two events, new secret).
+3. Webhooks are separate per mode: add the **same webhook again in Live mode** (same URL, same three events, new secret).
 4. In Vercel → Production environment, replace `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` with the live values. Redeploy.
 5. Make one real purchase with your own card or UPI, check the ticket and the email, then refund it from the Razorpay dashboard.
 6. Delete any test bookings you don't want in reports (they're `pending`/`paid` rows made with test payments).

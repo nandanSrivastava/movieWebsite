@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getStaffUser } from '@/lib/requestAuth';
+import { getRequestUser } from '@/lib/requestAuth';
 
 export async function GET(req: NextRequest) {
   try {
-    const staff = await getStaffUser(req);
-    if (!staff) {
+    const user = await getRequestUser(req);
+    if (user?.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden: Admin access required.' }, { status: 403 });
     }
 

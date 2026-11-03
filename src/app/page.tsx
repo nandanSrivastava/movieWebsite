@@ -8,6 +8,8 @@ import Footer from '@/features/shared/components/Footer';
 import HeroCarousel from '@/features/movies/components/HeroCarousel';
 import MovieCarousel from '@/features/movies/components/MovieCarousel';
 import UpcomingCarousel from '@/features/movies/components/UpcomingCarousel';
+import MapEmbed from '@/features/shared/components/MapEmbed';
+import { formatDayMonth } from '@/features/shared/utils/format';
 import { istDateString } from '@/lib/istDate';
 import { PHASE_PRODUCTION_BUILD } from 'next/constants';
 import styles from './home.module.css';
@@ -21,6 +23,16 @@ const HALL_FEATURES = [
   { Icon: Armchair, title: 'First-Class Recliners', desc: 'Experience movies in unparalleled comfort with our plush, fully-motorized leather reclining seats and expansive legroom.' },
   { Icon: Projector, title: 'Laser Projection', desc: 'Witness crystal-clear imagery, deeper contrasts, and vibrant colors with our next-generation laser projection technology.' },
   { Icon: Sparkles, title: 'Exclusive Ambiance', desc: 'Step into a world of luxury before the movie even begins, with our elegantly designed foyers and VIP lounges.' },
+];
+
+// Announced theatrical release dates (checked 25 Oct 2026). Each drops off this
+// row by itself once its date arrives. Move a film into the catalogue from admin
+// when its shows go on sale.
+const UPCOMING_MOVIES = [
+  { title: 'Ramayana: Part 1', releaseDate: '2026-11-05', poster: 'https://image.tmdb.org/t/p/w500/gOWnXaBxqT6k2y40hKfYU6c0Ym.jpg' },
+  { title: 'Yeh Prem Mol Liya', releaseDate: '2026-11-27', poster: 'https://image.tmdb.org/t/p/w500/kUxkvh6GMZL4AHNgNDty68yTnwQ.jpg' },
+  { title: 'Gunmaaster G9', releaseDate: '2026-11-27', poster: 'https://image.tmdb.org/t/p/w500/vDYF2q48AIvBRpFiqKj6lKyM0p6.jpg' },
+  { title: 'King', releaseDate: '2026-12-24', poster: 'https://image.tmdb.org/t/p/w500/74fHULlTBMGGLusfFBVAkMAZbce.jpg' },
 ];
 
 export default async function Home() {
@@ -54,14 +66,10 @@ export default async function Home() {
     console.error('[Home] Could not load today\'s shows for the hero:', err);
   }
 
-  // Announced theatrical release dates (checked 25 Oct 2026). Move a film into
-  // the catalogue from admin when its shows go on sale, and take it off this list.
-  const upcomingMovies = [
-    { title: 'Ramayana: Part 1', date: '5 November', poster: 'https://image.tmdb.org/t/p/w500/gOWnXaBxqT6k2y40hKfYU6c0Ym.jpg' },
-    { title: 'Yeh Prem Mol Liya', date: '27 November', poster: 'https://image.tmdb.org/t/p/w500/kUxkvh6GMZL4AHNgNDty68yTnwQ.jpg' },
-    { title: 'Gunmaaster G9', date: '27 November', poster: 'https://image.tmdb.org/t/p/w500/vDYF2q48AIvBRpFiqKj6lKyM0p6.jpg' },
-    { title: 'King', date: '24 December', poster: 'https://image.tmdb.org/t/p/w500/74fHULlTBMGGLusfFBVAkMAZbce.jpg' },
-  ];
+  const today = istDateString();
+  const upcomingMovies = UPCOMING_MOVIES
+    .filter(movie => movie.releaseDate > today)
+    .map(movie => ({ ...movie, date: formatDayMonth(movie.releaseDate) }));
 
   return (
     <>
@@ -79,10 +87,12 @@ export default async function Home() {
           )}
         </section>
 
-        <section className={`container ${styles.section}`} aria-labelledby="coming-soon">
-          <h2 id="coming-soon" className={styles.heading}>Coming soon</h2>
-          <UpcomingCarousel movies={upcomingMovies} />
-        </section>
+        {upcomingMovies.length > 0 && (
+          <section className={`container ${styles.section}`} aria-labelledby="coming-soon">
+            <h2 id="coming-soon" className={styles.heading}>Coming soon</h2>
+            <UpcomingCarousel movies={upcomingMovies} />
+          </section>
+        )}
 
         <section className={styles.hallBand} aria-labelledby="inside-hall">
           <div className="container">
@@ -142,13 +152,7 @@ export default async function Home() {
             </a>
           </div>
           <div className={styles.map}>
-            <iframe
-              src={`https://maps.google.com/maps?q=${CINEMA_LOCATION}&hl=en&z=15&output=embed`}
-              allowFullScreen={false}
-              loading="lazy"
-              referrerPolicy="no-referrer-when-downgrade"
-              title="Map showing Dhrub Cineplex in Bagaha"
-            ></iframe>
+            <MapEmbed location={CINEMA_LOCATION} title="Map showing Dhrub Cineplex in Bagaha" />
           </div>
         </section>
       </main>

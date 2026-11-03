@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { db } from '@/lib/db';
 import { processRefund, reconcilePendingBooking } from '@/lib/payments';
-import { deliverTicketEmail } from '@/lib/mailer';
+import { deliverRefundEmail, deliverTicketEmail } from '@/lib/mailer';
 
 export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
@@ -24,6 +24,7 @@ function authorized(req: NextRequest) {
  *   1. pending bookings: confirm if the customer actually paid, abandon if stale
  *   2. refund queue: retry refunds that failed
  *   3. ticket emails: send any that failed
+ *   4. refund notices: send any that failed
  */
 async function run(req: NextRequest) {
   if (!authorized(req)) {
@@ -32,11 +33,11 @@ async function run(req: NextRequest) {
 
   const started = Date.now();
   const outOfTime = () => Date.now() - started > TIME_BUDGET_MS;
-  const summary = { pending: {} as Record<string, number>, refunds: {} as Record<string, number>, emails: {} as Record<string, number>, errors: 0 };
+  const summary = { pending: {} as Record<string, number>, refunds: {} as Record<string, number>, emails: {} as Record<string, number>, refundEmails: {} as Record<string, number>, errors: 0 };
   const count = (bucket: Record<string, number>, key: string) => { bucket[key] = (bucket[key] || 0) + 1; };
 
   // Give the browser fallback and webhook a few minutes before stepping in
-  for (const booking of await db.getPendingOnlineBookings(3 * 60, 25)) {
+  for (const booking of await db.getPendingOnlineBookings(3 * 60, 50)) {
     if (outOfTime()) break;
     try {
       count(summary.pending, await reconcilePendingBooking(booking));
@@ -54,6 +55,11 @@ async function run(req: NextRequest) {
   for (const booking of await db.getUnsentTicketEmailBookings(20)) {
     if (outOfTime()) break;
     count(summary.emails, await deliverTicketEmail(booking.id));
+  }
+
+  for (const booking of await db.getUnsentRefundEmailBookings(20)) {
+    if (outOfTime()) break;
+    count(summary.refundEmails, await deliverRefundEmail(booking.id));
   }
 
   if (summary.errors > 0 || summary.refunds.retry_later) {

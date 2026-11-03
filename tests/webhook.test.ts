@@ -23,10 +23,14 @@ const db = vi.hoisted(() => ({
   logAudit: vi.fn(),
   hasProcessedWebhookEvent: vi.fn(),
   recordWebhookEvent: vi.fn(),
+  recordExternalRefund: vi.fn(),
 }));
 
+const mail = vi.hoisted(() => ({ queueTicketEmail: vi.fn(), queueRefundEmail: vi.fn(), sendExtraPaymentRefundEmail: vi.fn() }));
+
 vi.mock('@/lib/db', () => ({ db, isMockMode: false }));
-vi.mock('@/lib/mailer', () => ({ queueTicketEmail: vi.fn() }));
+vi.mock('@/lib/mailer', () => mail);
+vi.mock('@/lib/revalidate', () => ({ revalidateShowPages: vi.fn() }));
 
 import { POST } from '../src/app/api/checkout/webhook/route';
 
@@ -117,5 +121,43 @@ describe('Razorpay webhook', () => {
     const res = await POST(webhookRequest(captured()));
     expect((await res.json()).status).toBe('refund_queued');
     expect(db.claimRefund).toHaveBeenCalledWith(booking.id);
+  });
+
+  it('leaves a trace of money on an order nothing here tracks', async () => {
+    db.getBookingByOrderId.mockResolvedValue(null);
+    const res = await POST(webhookRequest(captured({ order_id: 'order_OTHER' })));
+    expect(res.status).toBe(200);
+    expect(db.logAudit).toHaveBeenCalledWith(null, 'PAYMENT_UNKNOWN_ORDER', expect.objectContaining({ orderId: 'order_OTHER', paymentId: 'pay_1' }));
+  });
+
+  describe('refund made in the Razorpay dashboard', () => {
+    const refunded = (amount_refunded: number) => ({
+      event: 'refund.processed',
+      payload: {
+        payment: { entity: { id: 'pay_1', order_id: 'order_ABC', status: 'refunded', amount: 30000, amount_refunded, currency: 'INR', notes: {} } },
+        refund: { entity: { id: 'rfnd_1' } },
+      },
+    });
+
+    it('ends the ticket and tells the customer, for a full refund', async () => {
+      db.recordExternalRefund.mockResolvedValue('refunded');
+      const res = await POST(webhookRequest(refunded(30000)));
+      expect((await res.json()).status).toBe('refunded');
+      expect(db.recordExternalRefund).toHaveBeenCalledWith(booking.id, 'pay_1', 'rfnd_1');
+      expect(mail.queueRefundEmail).toHaveBeenCalledWith(booking.id);
+    });
+
+    it('keeps the ticket for a part refund, and notes it', async () => {
+      const res = await POST(webhookRequest(refunded(10000)));
+      expect((await res.json()).status).toBe('part_refund');
+      expect(db.recordExternalRefund).not.toHaveBeenCalled();
+      expect(db.logAudit).toHaveBeenCalledWith(null, 'PAYMENT_PART_REFUND', expect.anything());
+    });
+
+    it('does nothing for a refund the app made itself', async () => {
+      db.recordExternalRefund.mockResolvedValue('ignored');
+      await POST(webhookRequest(refunded(30000)));
+      expect(mail.queueRefundEmail).not.toHaveBeenCalled();
+    });
   });
 });

@@ -7,10 +7,10 @@ import { Eye, EyeOff, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useToast } from '@/features/shared/context/ToastContext';
 import Header from '@/features/shared/components/Header';
-import { z } from 'zod';
 import { isMockMode } from '@/lib/config';
 import { supabase } from '@/lib/supabaseClient';
 import { safeRedirectPath } from '@/features/auth/utils/safeRedirect';
+import { EMAIL_MAX_LENGTH, isValidEmail, isValidMobile, NAME_MAX_LENGTH, toMobileDigits } from '@/lib/contactRules';
 import styles from './page.module.css';
 
 // Messages for the ?error= codes that /auth/callback and the proxy redirect with.
@@ -21,19 +21,28 @@ const LOGIN_ERROR_MESSAGES: Record<string, string> = {
   auth_callback_failed: "We couldn't sign you in from that link. Open it in the same browser you requested it from, or request a new one.",
 };
 
-const loginSchema = z.object({
-  email: z.string().trim().email("Invalid email format").max(255, "Email is too long"),
-  password: z.string().min(1, "Please fill in all required fields.").max(255, "Password is too long")
-    .refine(val => !/[<>]/.test(val), { message: "Invalid characters in password" }),
-});
+const PASSWORD_MAX_LENGTH = 255;
 
-const signUpSchema = loginSchema.extend({
-  password: z.string().min(8, "Password must be at least 8 characters long").max(255, "Password is too long")
-    .refine(val => !/[<>]/.test(val), { message: "Invalid characters in password" }),
-  fullName: z.string().trim().min(1, "Please provide your name").max(100, "Name is too long")
-    .refine(val => !/[<>]/.test(val), { message: "Invalid characters in name" }),
-  phone: z.string().trim().min(1, "Please provide your phone number").max(20, "Phone number is too long"),
-});
+function signInProblem(email: string, password: string): string | null {
+  const trimmed = email.trim();
+  if (trimmed.length > EMAIL_MAX_LENGTH) return 'Email is too long';
+  if (!isValidEmail(trimmed)) return 'Invalid email format';
+  if (!password) return 'Please fill in all required fields.';
+  if (password.length > PASSWORD_MAX_LENGTH) return 'Password is too long';
+  return null;
+}
+
+function signUpProblem(email: string, password: string, fullName: string, phone: string): string | null {
+  const emailOrPasswordProblem = signInProblem(email, password);
+  if (emailOrPasswordProblem) return emailOrPasswordProblem;
+  if (password.length < 8) return 'Password must be at least 8 characters long';
+  const name = fullName.trim();
+  if (!name) return 'Please provide your name';
+  if (name.length > NAME_MAX_LENGTH) return 'Name is too long';
+  if (/[<>]/.test(name)) return 'Invalid characters in name';
+  if (!isValidMobile(toMobileDigits(phone))) return 'Enter a 10-digit mobile number.';
+  return null;
+}
 
 type Notice = { tone: 'danger' | 'success'; text: string } | null;
 
@@ -73,7 +82,24 @@ function LoginContent() {
 
   // Handle auto-redirect if already logged in
   useEffect(() => {
-    if (user && !loading) {
+    if (!user || loading) return;
+    let cancelled = false;
+
+    const goOn = async () => {
+      // The saved session may be dead on the server (account deleted, sign-in service
+      // down). The page that sent them here already refused it, so redirecting on the
+      // saved session alone would bounce between the two pages forever.
+      if (!isMockMode) {
+        const { data, error } = await supabase.auth.getUser();
+        if (cancelled) return;
+        if (error || !data.user) {
+          const refused = !!error?.status && error.status >= 400 && error.status < 500;
+          if (refused) await supabase.auth.signOut({ scope: 'local' });
+          else setNotice({ tone: 'danger', text: 'We can’t confirm your sign-in right now. Please try again in a few minutes.' });
+          return;
+        }
+      }
+
       // Same-origin paths only — never follow '//evil.com', '/\evil.com' or absolute URLs.
       const redirectUrl = safeRedirectPath(searchParams.get('redirect'), window.location.origin, '');
       if (redirectUrl) {
@@ -88,7 +114,9 @@ function LoginContent() {
       } else {
         router.replace('/');
       }
-    }
+    };
+    goOn();
+    return () => { cancelled = true; };
   }, [user, loading, router, searchParams]);
 
   const switchMode = (signUpMode: boolean) => {
@@ -109,23 +137,16 @@ function LoginContent() {
       return;
     }
 
-    // Advanced Zod validation against attacks
-    let validationResult;
-    if (isSignUp) {
-      validationResult = signUpSchema.safeParse({ email, password, fullName, phone });
-    } else {
-      validationResult = loginSchema.safeParse({ email, password });
-    }
-
-    if (!validationResult.success) {
-      setNotice({ tone: 'danger', text: validationResult.error.issues[0]?.message || 'Invalid input provided.' });
+    const problem = isSignUp ? signUpProblem(email, password, fullName, phone) : signInProblem(email, password);
+    if (problem) {
+      setNotice({ tone: 'danger', text: problem });
       return;
     }
 
     setSubmitting(true);
     try {
       if (isSignUp) {
-        const { needsEmailConfirmation } = await signUp(email, password, fullName, phone);
+        const { needsEmailConfirmation } = await signUp(email.trim(), password, fullName.trim(), toMobileDigits(phone));
         if (needsEmailConfirmation) {
           // No session yet — Supabase emailed a confirmation link (→ /auth/callback).
           setNotice({ tone: 'success', text: 'Almost there! Check your email for a link to confirm your account.' });
@@ -135,12 +156,13 @@ function LoginContent() {
           showToast('Registration successful! Welcome to Dhrub Cineplex.', 'success');
         }
       } else {
-        await signIn(email, password);
+        await signIn(email.trim(), password);
         showToast('Successfully signed in.', 'success');
       }
     } catch (err: any) {
       console.error(err);
-      setNotice({ tone: 'danger', text: err.message || 'Authentication failed. Please verify credentials.' });
+      const offline = err instanceof TypeError || err?.name === 'AuthRetryableFetchError';
+      setNotice({ tone: 'danger', text: offline ? 'We couldn’t reach the server. Check your connection and try again.' : err.message || 'Authentication failed. Please verify credentials.' });
     } finally {
       setSubmitting(false);
     }
@@ -152,7 +174,7 @@ function LoginContent() {
       document.getElementById('login-email')?.focus();
       return;
     }
-    if (!loginSchema.shape.email.safeParse(email).success) {
+    if (!isValidEmail(email.trim())) {
       setNotice({ tone: 'danger', text: 'Please enter a valid email address.' });
       return;
     }

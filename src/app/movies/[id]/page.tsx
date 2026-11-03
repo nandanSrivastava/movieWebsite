@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { cache } from 'react';
+import type { Metadata } from 'next';
 import TrailerEmbed from '@/features/movies/components/TrailerEmbed';
 import { posterImgProps } from '@/features/shared/utils/posterImage';
 import { notFound } from 'next/navigation';
@@ -28,11 +29,31 @@ export async function generateStaticParams() {
   return [];
 }
 
+// Metadata and the page ask for the same film; one database read serves both
+const getMovie = cache((id: string) => db.getMovieById(id));
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const movie = await getMovie((await params).id);
+  if (!movie) return { title: 'Film not found', robots: { index: false, follow: false } };
+
+  const description = movie.synopsis?.slice(0, 160) || `Book tickets for ${movie.title} at Dhrub Cineplex, Bagaha.`;
+  return {
+    title: `${movie.title}: showtimes and tickets`,
+    description,
+    openGraph: {
+      title: `${movie.title} at Dhrub Cineplex`,
+      description,
+      ...(movie.poster_url ? { images: [{ url: movie.poster_url }] } : {}),
+    },
+    ...(movie.is_active === false ? { robots: { index: false, follow: true } } : {}),
+  };
+}
+
 export default async function MovieDetailsPage({ params }: PageProps) {
   const { id } = await params;
 
   // Fetch movie details and scheduling
-  const movie = await db.getMovieById(id);
+  const movie = await getMovie(id);
   if (!movie) {
     notFound();
   }
@@ -40,7 +61,7 @@ export default async function MovieDetailsPage({ params }: PageProps) {
   // Only today onward (cinema time, IST) — older shows would just bloat the
   // page payload. ShowtimePanel drops today's already-started shows.
   const today = istDateString();
-  const shows = (await db.getShowsForMovie(id)).filter((s) => s.show_date >= today);
+  const shows = movie.is_active === false ? [] : (await db.getShowsForMovie(id)).filter((s) => s.show_date >= today);
   const genres = (movie.genre || '').split(',').map(g => g.trim()).filter(Boolean);
 
   return (
@@ -79,7 +100,11 @@ export default async function MovieDetailsPage({ params }: PageProps) {
 
           <section className={styles.showtimes} id="showtimes" aria-labelledby="showtimes-heading">
             <h2 id="showtimes-heading" className={styles.sectionTitle}>Book tickets</h2>
-            <ShowtimePanel shows={shows} renderedAt={Date.now()} />
+            {movie.is_active === false ? (
+              <p>This film is no longer showing. <Link href="/movies">See what’s on now</Link></p>
+            ) : (
+              <ShowtimePanel shows={shows} renderedAt={Date.now()} />
+            )}
           </section>
 
           {movie.synopsis && (

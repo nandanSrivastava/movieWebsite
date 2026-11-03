@@ -1,7 +1,12 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { db } from '@/lib/db';
 import { getRequestUser } from '@/lib/requestAuth';
 import { istDateString, showStartsAt } from '@/lib/istDate';
+import { processRefund } from '@/lib/payments';
+import { deliverRefundEmail } from '@/lib/mailer';
+import { revalidateShowPages } from '@/lib/revalidate';
+import { findOverlap } from '@/features/admin/utils/showOverlap';
+import { formatShowTime } from '@/features/shared/utils/format';
 import { z } from 'zod';
 
 const MAX_SHOWS_PER_REQUEST = 120;
@@ -21,6 +26,13 @@ const scheduleSchema = z.object({
   price_normal: ticketPrice.optional(),
   price_premium: ticketPrice.optional(),
 });
+
+// A film can run into the next calendar day, so look one day either side
+const dayBefore = (date: string) => new Date(new Date(`${date}T00:00:00Z`).getTime() - 86_400_000).toISOString().slice(0, 10);
+const dayAfter = (date: string) => new Date(new Date(`${date}T00:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10);
+
+// Enough to finish a batch of refunds when a sold show is cancelled; the reconcile job takes any left over
+const REFUNDS_PER_CANCEL_BATCH = 50;
 
 async function isAdmin(req: NextRequest): Promise<boolean> {
   try {
@@ -82,18 +94,45 @@ export async function POST(req: NextRequest) {
     if (targetDates.length * targetTimes.length > MAX_SHOWS_PER_REQUEST) {
       return NextResponse.json({ error: `At most ${MAX_SHOWS_PER_REQUEST} shows can be scheduled at once` }, { status: 400 });
     }
-    const pastSlot = targetDates.flatMap(d => targetTimes.map(t => ({ d, t })))
-      .find(({ d, t }) => showStartsAt(d, t).getTime() < Date.now());
-    if (pastSlot) {
-      return NextResponse.json({ error: `${pastSlot.d} ${pastSlot.t} is in the past` }, { status: 400 });
+    const slotPassed = (date: string, time: string) => showStartsAt(date, time).getTime() < Date.now();
+    if (targetDates.every(d => targetTimes.every(t => slotPassed(d, t)))) {
+      return NextResponse.json({ error: `${targetDates[0]} ${targetTimes[0]} is in the past` }, { status: 400 });
     }
+
+    const movie = await db.getMovieById(movie_id);
+    if (!movie) {
+      return NextResponse.json({ error: 'That movie no longer exists. Refresh the page and pick it again.' }, { status: 400 });
+    }
+    if (movie.is_active === false) {
+      return NextResponse.json({ error: `${movie.title} is hidden from the site. Show it again before scheduling.` }, { status: 400 });
+    }
+
+    const sortedDates = [...targetDates].sort();
+    const onScreen = (await db.getShowsForScreen(screen_id, dayBefore(sortedDates[0]), dayAfter(sortedDates[sortedDates.length - 1])))
+      .map(show => ({
+        show_date: show.show_date,
+        show_time: show.show_time,
+        durationMinutes: Number(show.movie?.duration_minutes) || 0,
+        title: show.movie?.title,
+      }));
 
     const createdShows = [];
     const errors = [];
 
     for (const date of targetDates) {
       for (const time of targetTimes) {
+        // Scheduling from today on: today's earlier slots simply don't apply
+        if (slotPassed(date, time)) {
+          errors.push({ date, time, error: 'Already in the past' });
+          continue;
+        }
         const formattedTime = time.length === 5 ? `${time}:00` : time;
+        const slot = { show_date: date, show_time: formattedTime, durationMinutes: Number(movie.duration_minutes) || 0, title: movie.title };
+        const clash = findOverlap(slot, onScreen);
+        if (clash) {
+          errors.push({ date, time, error: `Clashes with ${clash.title ?? 'another show'} at ${formatShowTime(clash.show_time)} on ${clash.show_date}` });
+          continue;
+        }
         try {
           const newShow = await db.createShow({
             movie_id,
@@ -106,13 +145,19 @@ export async function POST(req: NextRequest) {
             price_recliner: classicPrice
           } as any);
           createdShows.push(newShow);
+          onScreen.push(slot);
         } catch (err: any) {
           console.error(`Create show ${date} ${time} failed:`, err);
-          errors.push({ date, time, error: 'Already scheduled or invalid' });
+          errors.push({ date, time, error: err?.code === '23505' ? 'Already scheduled' : 'Could not be saved' });
         }
       }
     }
 
+    if (createdShows.length === 0) {
+      return NextResponse.json({ error: errors[0]?.error || 'Nothing was scheduled', skipped: errors }, { status: 409 });
+    }
+
+    revalidateShowPages(movie_id);
     return NextResponse.json({
       success: true,
       count: createdShows.length,
@@ -125,6 +170,11 @@ export async function POST(req: NextRequest) {
   }
 }
 
+/**
+ * Cancels a show. Nobody booked it: it's removed. Otherwise it comes off sale,
+ * online tickets are refunded and their buyers told, and cash tickets are marked
+ * for repayment at the counter.
+ */
 export async function DELETE(req: NextRequest) {
   try {
     if (!(await isAdmin(req))) {
@@ -137,10 +187,39 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Show ID is required' }, { status: 400 });
     }
 
-    await db.deleteShow(id);
-    return NextResponse.json({ success: true, message: 'Showtime cancelled successfully' });
+    const show = await db.getShowById(id);
+    const result = await db.cancelShow(id);
+    if (result.status === 'not_found') {
+      return NextResponse.json({ error: 'That showtime no longer exists.' }, { status: 404 });
+    }
+    if (result.status === 'already_started') {
+      return NextResponse.json({ error: 'This show has already started, so it can’t be cancelled. To refund one customer, use the Razorpay dashboard.' }, { status: 409 });
+    }
+
+    const user = await getRequestUser(req);
+    await db.logAudit(user?.id ?? null, 'SHOW_CANCELLED', { showId: id, ...result });
+    revalidateShowPages(show?.movie_id, id);
+
+    if (result.onlineRefunds > 0 || result.cashRefunds > 0) {
+      after(async () => {
+        for (const booking of await db.getRefundPendingBookings(REFUNDS_PER_CANCEL_BATCH)) {
+          await processRefund(booking.id);
+        }
+        for (const booking of await db.getUnsentRefundEmailBookings(REFUNDS_PER_CANCEL_BATCH)) {
+          await deliverRefundEmail(booking.id);
+        }
+      });
+    }
+
+    return NextResponse.json({
+      success: true,
+      removed: result.status === 'deleted',
+      onlineRefunds: result.onlineRefunds,
+      cashRefunds: result.cashRefunds,
+      message: 'Showtime cancelled successfully',
+    });
   } catch (err) {
     console.error('Delete show error:', err);
-    return NextResponse.json({ error: 'Cannot cancel this showtime (it may have bookings).' }, { status: 500 });
+    return NextResponse.json({ error: 'Could not cancel this showtime. Please try again.' }, { status: 500 });
   }
 }

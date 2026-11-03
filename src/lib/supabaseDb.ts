@@ -2,11 +2,18 @@ import 'server-only';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import {
   Movie, Screen, Show, SeatStatus, Booking, Profile, AuditLog, DatabaseClient,
-  LockResult, FinalizeResult, SeatAvailability, SeatHold, ActiveLock, SalesSummary, PendingBookingResult
+  LockResult, FinalizeResult, SeatAvailability, SeatHold, ActiveLock, SalesSummary, PendingBookingResult,
+  CancelShowResult, MAX_TICKET_EMAIL_ATTEMPTS
 } from './types';
+import { matchHolderBooking, ticketStillUsable } from './bookingAccess';
 
 const BOOKING_FULL_SELECT =
   '*, show:shows(*, movie:movies(*), screen:screens(*)), booking_seats(seat_layout_id, price, seat_layout:seat_layout(*))';
+
+// Gate list and owner's report: only what those screens print. A movie's synopsis
+// and poster don't belong in a list of 200 bookings.
+const BOOKING_LIST_SELECT =
+  'id, show_id, customer_name, customer_phone, customer_email, total_amount, payment_status, booking_channel, qr_code_token, checked_in_at, admitted_seats, paid_at, created_at, refund_reason, show:shows(show_date, show_time, cancelled_at, movie:movies(title)), booking_seats(seat_layout_id, price, seat_layout:seat_layout(row_label, seat_number, category))';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -52,7 +59,13 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     );
   }
 
+  public async getAllMovies(): Promise<Movie[]> {
+    return this.fetchWithRetry(() => this.supabase.from('movies').select('*').order('created_at', { ascending: false }));
+  }
+
   public async getMovieById(id: string): Promise<Movie | null> {
+    // movies.id is a UUID column; anything else would fail the cast in Postgres
+    if (!UUID_RE.test(id)) return null;
     const { data, error } = await this.supabase.from('movies').select('*').eq('id', id).maybeSingle();
     if (error) throw error;
     return data;
@@ -107,7 +120,7 @@ export class SupabaseDatabaseClient implements DatabaseClient {
 
   public async getShows(fromDate?: string): Promise<Show[]> {
     return this.fetchWithRetry(() => {
-      let query = this.supabase.from('shows').select('*, movie:movies(*), screen:screens(*)');
+      let query = this.supabase.from('shows').select('*, movie:movies(*), screen:screens(*)').is('cancelled_at', null);
       if (fromDate) query = query.gte('show_date', fromDate);
       return query.order('show_date').order('show_time').limit(1000);
     });
@@ -115,17 +128,31 @@ export class SupabaseDatabaseClient implements DatabaseClient {
 
   public async getShowsForDate(date: string): Promise<Show[]> {
     return this.fetchWithRetry(() => 
-      this.supabase.from('shows').select('*, movie:movies(*), screen:screens(*)').eq('show_date', date)
+      this.supabase.from('shows').select('*, movie:movies(*), screen:screens(*)').eq('show_date', date).is('cancelled_at', null)
     );
   }
 
   public async getShowsForMovie(movieId: string): Promise<Show[]> {
     return this.fetchWithRetry(() => 
-      this.supabase.from('shows').select('*, movie:movies(*), screen:screens(*)').eq('movie_id', movieId)
+      this.supabase.from('shows').select('*, movie:movies(*), screen:screens(*)').eq('movie_id', movieId).is('cancelled_at', null)
     );
   }
 
+  public async getShowsForScreen(screenId: string, fromDate: string, toDate: string): Promise<Show[]> {
+    if (!UUID_RE.test(screenId)) return [];
+    const { data, error } = await this.supabase
+      .from('shows')
+      .select('*, movie:movies(*)')
+      .eq('screen_id', screenId)
+      .gte('show_date', fromDate)
+      .lte('show_date', toDate)
+      .is('cancelled_at', null);
+    if (error) throw error;
+    return data as Show[];
+  }
+
   public async getShowById(id: string): Promise<Show | null> {
+    if (!UUID_RE.test(id)) return null;
     const { data, error } = await this.supabase
       .from('shows')
       .select('*, movie:movies(*), screen:screens(*)')
@@ -139,13 +166,19 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     const { data: newShow, error } = await this.supabase.from('shows').insert(show).select().single();
     if (error) throw error;
 
+    // Never leave a show on sale that has no seats
+    const removeShow = () => this.supabase.from('shows').delete().eq('id', newShow.id);
+
     // Auto-generate seat_status mappings from seat_layout rows
     const { data: layouts, error: layoutError } = await this.supabase
       .from('seat_layout')
       .select('id')
       .eq('screen_id', show.screen_id);
 
-    if (layoutError) throw layoutError;
+    if (layoutError) {
+      await removeShow();
+      throw layoutError;
+    }
 
     const statuses = layouts.map(l => ({
       show_id: newShow.id,
@@ -154,15 +187,19 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     }));
 
     const { error: statusError } = await this.supabase.from('seat_status').insert(statuses);
-    if (statusError) throw statusError;
+    if (statusError) {
+      await removeShow();
+      throw statusError;
+    }
 
     return this.getShowById(newShow.id) as Promise<Show>;
   }
 
-  public async deleteShow(id: string): Promise<boolean> {
-    const { error } = await this.supabase.from('shows').delete().eq('id', id);
+  public async cancelShow(id: string): Promise<CancelShowResult> {
+    if (!UUID_RE.test(id)) return { status: 'not_found', onlineRefunds: 0, cashRefunds: 0 };
+    const { data, error } = await this.supabase.rpc('cancel_show', { p_show_id: id });
     if (error) throw error;
-    return true;
+    return { status: data.status, onlineRefunds: data.online_refunds ?? 0, cashRefunds: data.cash_refunds ?? 0 };
   }
 
   public async getSeatsForShow(showId: string): Promise<SeatStatus[]> {
@@ -235,26 +272,33 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     return data;
   }
 
-  public async releaseSeatHolds(showId: string, seatLayoutIds: string[], owner: string): Promise<void> {
-    if (!UUID_RE.test(showId) || !UUID_RE.test(owner)) return;
-    const { error } = await this.supabase
-      .from('seat_status')
-      .update({ status: 'available', locked_by: null, locked_ip: null, locked_at: null, lock_expires_at: null })
-      .eq('show_id', showId)
-      .in('seat_layout_id', seatLayoutIds)
-      .eq('locked_by', owner)
-      .eq('status', 'locked');
+  public async releaseSeatHolds(showId: string | null, seatLayoutIds: string[] | null, owner: string): Promise<void> {
+    if (!UUID_RE.test(owner) || (showId !== null && !UUID_RE.test(showId))) return;
+    const seats = seatLayoutIds && seatLayoutIds.filter(id => UUID_RE.test(id));
+    if (seats && seats.length === 0) return;
+    const { error } = await this.supabase.rpc('release_seat_holds', {
+      p_show_id: showId,
+      p_seat_layout_ids: seats,
+      p_owner: owner,
+    });
+    if (error) throw error;
+  }
+
+  public async adoptGuestHolds(guestId: string, userId: string): Promise<void> {
+    if (!UUID_RE.test(guestId) || !UUID_RE.test(userId)) return;
+    const { error } = await this.supabase.rpc('adopt_guest_holds', { p_guest: guestId, p_user: userId });
     if (error) throw error;
   }
 
   public async forceReleaseSeatHolds(showId: string, seatLayoutIds: string[]): Promise<void> {
-    if (!UUID_RE.test(showId)) return;
+    const seats = seatLayoutIds.filter(id => UUID_RE.test(id));
+    if (!UUID_RE.test(showId) || seats.length === 0) return;
     // Only ever releases holds; a booked (sold) seat is never touched
     const { error } = await this.supabase
       .from('seat_status')
       .update({ status: 'available', locked_by: null, locked_ip: null, locked_at: null, lock_expires_at: null })
       .eq('show_id', showId)
-      .in('seat_layout_id', seatLayoutIds)
+      .in('seat_layout_id', seats)
       .eq('status', 'locked');
     if (error) throw error;
   }
@@ -316,9 +360,56 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     return { status: data.status, booking: data.booking ?? null, holdExpiresAt: data.hold_expires_at ?? null };
   }
 
-  public async setBookingOrderId(bookingId: string, orderId: string): Promise<void> {
-    const { error } = await this.supabase.from('bookings').update({ razorpay_order_id: orderId }).eq('id', bookingId);
+  public async setBookingOrderId(bookingId: string, orderId: string): Promise<string> {
+    // First writer wins. Two overlapping Pay requests can each create an order;
+    // if both were handed out, the customer could pay one nothing tracks.
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .update({ razorpay_order_id: orderId })
+      .eq('id', bookingId)
+      .is('razorpay_order_id', null)
+      .select('razorpay_order_id')
+      .maybeSingle();
     if (error) throw error;
+    if (data) return data.razorpay_order_id;
+
+    const { data: winner, error: readErr } = await this.supabase
+      .from('bookings')
+      .select('razorpay_order_id')
+      .eq('id', bookingId)
+      .single();
+    if (readErr) throw readErr;
+    return winner.razorpay_order_id;
+  }
+
+  public async findHolderBooking(showId: string, seatLayoutIds: string[], owners: string[]): Promise<Booking | null> {
+    const ids = owners.filter(id => UUID_RE.test(id));
+    if (!UUID_RE.test(showId) || ids.length === 0 || seatLayoutIds.length === 0) return null;
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .select('*, booking_seats(seat_layout_id)')
+      .eq('show_id', showId)
+      .in('hold_owner', ids)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error) throw error;
+    return matchHolderBooking(data as Booking[], seatLayoutIds);
+  }
+
+  public async findHolderTickets(owners: string[], limit: number): Promise<Booking[]> {
+    const ids = owners.filter(id => UUID_RE.test(id));
+    if (ids.length === 0) return [];
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .select(BOOKING_FULL_SELECT)
+      .eq('payment_status', 'paid')
+      // Their own purchases. A cashier's cash sales belong to the people they sold to.
+      .eq('booking_channel', 'online')
+      .in('hold_owner', ids)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return (data as unknown as Booking[]).filter(ticketStillUsable);
   }
 
   public async getBookingById(id: string): Promise<Booking | null> {
@@ -440,15 +531,25 @@ export class SupabaseDatabaseClient implements DatabaseClient {
 
   public async getPendingOnlineBookings(olderThanSeconds: number, limit: number): Promise<Booking[]> {
     const cutoff = new Date(Date.now() - olderThanSeconds * 1000).toISOString();
+    // Least recently checked first: a queue of abandoned checkouts must not hide
+    // a newer booking that was really paid.
     const { data, error } = await this.supabase
       .from('bookings')
       .select('*')
       .eq('payment_status', 'pending')
       .eq('booking_channel', 'online')
       .lt('created_at', cutoff)
+      .order('reconciled_at', { ascending: true, nullsFirst: true })
       .order('created_at')
       .limit(limit);
     if (error) throw error;
+    if (data.length > 0) {
+      const { error: markErr } = await this.supabase
+        .from('bookings')
+        .update({ reconciled_at: new Date().toISOString() })
+        .in('id', data.map(b => b.id));
+      if (markErr) throw markErr;
+    }
     return data;
   }
 
@@ -457,8 +558,21 @@ export class SupabaseDatabaseClient implements DatabaseClient {
       .from('bookings')
       .select('*')
       .eq('payment_status', 'refund_pending')
+      // Fewest attempts first: refunds that keep failing must not block the rest
+      .order('refund_attempts')
       .order('created_at')
       .limit(limit);
+    if (error) throw error;
+    return data;
+  }
+
+  public async recordExternalRefund(bookingId: string, paymentId: string, refundId: string | null): Promise<'refunded' | 'ignored'> {
+    if (!UUID_RE.test(bookingId)) return 'ignored';
+    const { data, error } = await this.supabase.rpc('record_external_refund', {
+      p_booking_id: bookingId,
+      p_payment_id: paymentId,
+      p_refund_id: refundId,
+    });
     if (error) throw error;
     return data;
   }
@@ -480,7 +594,7 @@ export class SupabaseDatabaseClient implements DatabaseClient {
     if (error) throw error;
   }
 
-  public async claimTicketEmail(bookingId: string): Promise<boolean> {
+  public async claimTicketEmail(bookingId: string): Promise<number | null> {
     const now = new Date();
     const { data: current, error: readErr } = await this.supabase
       .from('bookings')
@@ -488,13 +602,14 @@ export class SupabaseDatabaseClient implements DatabaseClient {
       .eq('id', bookingId)
       .maybeSingle();
     if (readErr) throw readErr;
-    if (!current || current.ticket_email_attempts >= 5) return false;
+    if (!current || current.ticket_email_attempts >= MAX_TICKET_EMAIL_ATTEMPTS) return null;
 
+    const attempt = current.ticket_email_attempts + 1;
     const { data, error } = await this.supabase
       .from('bookings')
       .update({
         ticket_email_locked_until: new Date(now.getTime() + 2 * 60 * 1000).toISOString(),
-        ticket_email_attempts: current.ticket_email_attempts + 1,
+        ticket_email_attempts: attempt,
       })
       .eq('id', bookingId)
       .eq('payment_status', 'paid')
@@ -503,7 +618,7 @@ export class SupabaseDatabaseClient implements DatabaseClient {
       .select('id')
       .maybeSingle();
     if (error) throw error;
-    return !!data;
+    return data ? attempt : null;
   }
 
   public async markTicketEmailSent(bookingId: string): Promise<void> {
@@ -520,8 +635,40 @@ export class SupabaseDatabaseClient implements DatabaseClient {
       .select('id')
       .eq('payment_status', 'paid')
       .is('ticket_email_sent_at', null)
-      .lt('ticket_email_attempts', 5)
+      .lt('ticket_email_attempts', MAX_TICKET_EMAIL_ATTEMPTS)
       .order('paid_at')
+      .limit(limit);
+    if (error) throw error;
+    return data as Booking[];
+  }
+
+  public async claimRefundEmail(bookingId: string): Promise<boolean> {
+    // Marked sent before sending, so parallel callers can't both send it.
+    // A failed send puts it back with releaseRefundEmail.
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .update({ refund_email_sent_at: new Date().toISOString() })
+      .eq('id', bookingId)
+      .eq('payment_status', 'refunded')
+      .is('refund_email_sent_at', null)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    return !!data;
+  }
+
+  public async releaseRefundEmail(bookingId: string): Promise<void> {
+    const { error } = await this.supabase.from('bookings').update({ refund_email_sent_at: null }).eq('id', bookingId);
+    if (error) throw error;
+  }
+
+  public async getUnsentRefundEmailBookings(limit: number): Promise<Booking[]> {
+    const { data, error } = await this.supabase
+      .from('bookings')
+      .select('id')
+      .eq('payment_status', 'refunded')
+      .is('refund_email_sent_at', null)
+      .order('refunded_at')
       .limit(limit);
     if (error) throw error;
     return data as Booking[];
@@ -581,36 +728,55 @@ export class SupabaseDatabaseClient implements DatabaseClient {
 
     const { data, error } = await this.supabase
       .from('bookings')
-      .select(BOOKING_FULL_SELECT)
+      .select(BOOKING_LIST_SELECT)
       .eq('payment_status', 'paid')
       .in('show_id', shows.map((s) => s.id))
       .order('created_at', { ascending: false })
       .limit(limit);
 
     if (error) throw error;
-    return data;
+    return data as unknown as Booking[];
   }
 
-  public async checkInBooking(bookingId: string, staffId: string | null): Promise<boolean> {
-    // Atomic: only a paid booking that hasn't been admitted yet is updated,
-    // so two gates scanning the same ticket can't both admit it.
+  public async getBookingsForShowDate(showDate: string): Promise<Booking[]> {
+    // Cancelled shows count here: the owner still has to account for their money
+    const { data: shows, error: showsErr } = await this.supabase.from('shows').select('id').eq('show_date', showDate);
+    if (showsErr) throw showsErr;
+    if (shows.length === 0) return [];
+
     const { data, error } = await this.supabase
       .from('bookings')
-      .update({ checked_in_at: new Date().toISOString(), checked_in_by: staffId })
-      .eq('id', bookingId)
-      .eq('payment_status', 'paid')
-      .is('checked_in_at', null)
-      .select('id')
-      .maybeSingle();
-
+      .select(BOOKING_LIST_SELECT)
+      .in('show_id', shows.map((s) => s.id))
+      .in('payment_status', ['paid', 'refund_pending', 'refunded'])
+      .order('created_at', { ascending: false })
+      .limit(1000);
     if (error) throw error;
-    return !!data;
+    return data as unknown as Booking[];
+  }
+
+  public async checkInBooking(bookingId: string, staffId: string | null, count?: number): Promise<number> {
+    // Atomic in the database, so two gates scanning one ticket can't admit the same people
+    const { data, error } = await this.supabase.rpc('admit_seats', {
+      p_booking_id: bookingId,
+      p_staff: staffId,
+      p_count: count ?? null,
+    });
+    if (error) throw error;
+    return data as number;
+  }
+
+  public async undoCheckIn(bookingId: string): Promise<boolean> {
+    if (!UUID_RE.test(bookingId)) return false;
+    const { data, error } = await this.supabase.rpc('undo_admission', { p_booking_id: bookingId });
+    if (error) throw error;
+    return data as boolean;
   }
 
   public async getBookingsByUser(userId: string): Promise<Booking[]> {
     const { data, error } = await this.supabase
       .from('bookings')
-      .select('*, show:shows(*, movie:movies(*), screen:screens(*))')
+      .select(BOOKING_FULL_SELECT)
       .eq('booked_by', userId)
       .order('created_at', { ascending: false });
 
@@ -619,6 +785,8 @@ export class SupabaseDatabaseClient implements DatabaseClient {
   }
 
   public async getProfile(id: string): Promise<Profile | null> {
+    // profiles.id is a UUID column; anything else would fail the cast in Postgres
+    if (!UUID_RE.test(id)) return null;
     const { data, error } = await this.supabase.from('profiles').select('*').eq('id', id).maybeSingle();
     if (error) throw error;
     return data;
@@ -694,7 +862,13 @@ export class SupabaseDatabaseClient implements DatabaseClient {
   }
 
   public async getAuditLogs(limit: number): Promise<AuditLog[]> {
-    const { data, error } = await this.supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(limit);
+    // One row per seat hold would push sales and refunds out of view within minutes
+    const { data, error } = await this.supabase
+      .from('audit_logs')
+      .select('*')
+      .neq('action', 'SEAT_LOCK')
+      .order('created_at', { ascending: false })
+      .limit(limit);
     if (error) throw error;
     return data;
   }

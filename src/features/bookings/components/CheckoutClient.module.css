@@ -58,3 +58,5 @@
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
+
+.release { display: block; margin: 16px auto 0; }

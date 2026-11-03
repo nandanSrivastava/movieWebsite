@@ -1,14 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useCallback, useState, useEffect, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { TriangleAlert, RefreshCw, Clock } from 'lucide-react';
-import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useToast } from '@/features/shared/context/ToastContext';
+import { useServerOffset } from '@/features/shared/hooks/useServerClock';
 import { ShowType, SeatStatusType } from '@/lib/db';
-import { isMockMode } from '@/lib/config';
-import { supabase as supabaseClient } from '@/lib/supabaseClient';
+import { authHeaders } from '@/lib/authHeaders';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { categoryPrice, formatINR, formatShowTime, hasShowStarted, seatLabel } from '@/features/shared/utils/format';
 import SeatingGrid from '@/features/bookings/components/SeatingGrid';
@@ -28,74 +27,144 @@ const POLL_BASE_MS = 10_000;
 const POLL_JITTER_MS = 3_000;
 const MAX_SEATS = 10;
 
+type SeatStatuses = Record<string, SeatStatusType['status']>;
+
+// navigator.cookieEnabled can say yes when a block-all setting is on, so actually try one
+function cookiesWork(): boolean {
+  if (!navigator.cookieEnabled) return false;
+  document.cookie = 'dt_cookie_check=1; path=/; max-age=60; SameSite=Lax';
+  const stored = document.cookie.includes('dt_cookie_check=1');
+  document.cookie = 'dt_cookie_check=; path=/; max-age=0';
+  return stored;
+}
+
 export default function SeatingMapClient({ show, initialSeats, showStarted = false }: SeatingMapClientProps) {
   const router = useRouter();
-  const { user } = useCineBookAuth();
   const { showToast } = useToast();
   const queryClient = useQueryClient();
+  const serverOffset = useServerOffset();
 
   const [selectedSeats, setSelectedSeats] = useState<Set<string>>(() => new Set());
-  const [heldByMe, setHeldByMe] = useState<Set<string>>(() => new Set());
   const [submitting, setSubmitting] = useState(false);
+  const [cookiesBlocked, setCookiesBlocked] = useState(false);
   const [pollInterval] = useState(() => POLL_BASE_MS + Math.floor(Math.random() * POLL_JITTER_MS));
   const [started, setStarted] = useState(showStarted);
 
+  // The CDN keeps a few-second copy of the seat map. Right after this customer
+  // changes a seat that copy is out of date, so the next read goes around it.
+  const freshRead = useRef(false);
+  const fetchStatuses = useCallback(async (): Promise<SeatStatuses> => {
+    const bust = freshRead.current ? `&fresh=${Date.now()}` : '';
+    freshRead.current = false;
+    const res = await fetch(`/api/seats/status?showId=${show.id}${bust}`);
+    if (!res.ok) throw new Error('Failed fetching seats');
+    const data = await res.json();
+    return Object.fromEntries((data.seats as { seat_layout_id: string; status: SeatStatusType['status'] }[])
+      .map(seat => [seat.seat_layout_id, seat.status]));
+  }, [show.id]);
+
+  const fetchHolds = useCallback(async (): Promise<string[]> => {
+    const res = await fetch(`/api/seats/holds?showId=${show.id}`, { headers: await authHeaders() });
+    if (!res.ok) throw new Error('Failed fetching holds');
+    return (await res.json()).seatLayoutIds;
+  }, [show.id]);
+
+  const seatsKey = useMemo(() => ['seats', show.id], [show.id]);
+  const holdsKey = useMemo(() => ['seatHolds', show.id], [show.id]);
+
   const { data: statusById, isError: refreshFailed } = useQuery({
-    queryKey: ['seats', show.id],
-    queryFn: async () => {
-      const res = await fetch(`/api/seats/status?showId=${show.id}`);
-      if (!res.ok) throw new Error('Failed fetching seats');
-      const data = await res.json();
-      return Object.fromEntries((data.seats as { seat_layout_id: string; status: SeatStatusType['status'] }[])
-        .map(seat => [seat.seat_layout_id, seat.status]));
-    },
+    queryKey: seatsKey,
+    queryFn: fetchStatuses,
     // The page HTML is cached for a few seconds, so refresh statuses right away
-    initialData: () => Object.fromEntries(initialSeats.map(seat => [seat.seat_layout_id, seat.status])),
+    initialData: () => Object.fromEntries(initialSeats.map(seat => [seat.seat_layout_id, seat.status])) as SeatStatuses,
     initialDataUpdatedAt: 0,
     refetchInterval: pollInterval,
     staleTime: 0,
     retry: 1,
   });
 
-  // The page can sit open past showtime; close booking when the show begins
+  // The seats this browser holds. Kept up to date while there are any, so a hold
+  // that runs out here doesn't go on looking like this customer's seat.
+  const { data: heldIds, isFetchedAfterMount: holdsLoaded } = useQuery({
+    queryKey: holdsKey,
+    queryFn: fetchHolds,
+    refetchInterval: query => (query.state.data?.length ? pollInterval : false),
+    staleTime: 0,
+    gcTime: 0,
+    retry: 1,
+  });
+  const heldByMe = useMemo(() => new Set(heldIds ?? []), [heldIds]);
+
+  // The page can sit open past showtime; close booking when the show begins.
+  // Waits for the server's clock: this phone's may be wrong.
   useEffect(() => {
-    if (started) return;
-    const check = () => { if (hasShowStarted(show.show_date, show.show_time)) setStarted(true); };
+    if (started || serverOffset === null) return;
+    const check = () => { if (hasShowStarted(show.show_date, show.show_time, Date.now() + serverOffset)) setStarted(true); };
     check();
     const id = setInterval(check, 30_000);
     return () => clearInterval(id);
-  }, [started, show.show_date, show.show_time]);
+  }, [started, serverOffset, show.show_date, show.show_time]);
 
   // Seats this browser already holds (e.g. came back from checkout) start selected
+  const restoredHolds = useRef(false);
   useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/seats/holds?showId=${show.id}`)
-      .then(res => (res.ok ? res.json() : { seatLayoutIds: [] }))
-      .then(({ seatLayoutIds }: { seatLayoutIds: string[] }) => {
-        if (cancelled || seatLayoutIds.length === 0) return;
-        setHeldByMe(new Set(seatLayoutIds));
-        setSelectedSeats(prev => new Set([...Array.from(prev), ...seatLayoutIds]));
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [show.id]);
+    if (restoredHolds.current || !holdsLoaded || !heldIds) return;
+    restoredHolds.current = true;
+    if (heldIds.length > 0) setSelectedSeats(prev => new Set([...Array.from(prev), ...heldIds]));
+  }, [holdsLoaded, heldIds]);
 
   const seats = useMemo(
     () => initialSeats.map(seat => ({ ...seat, status: statusById?.[seat.seat_layout_id] ?? seat.status })),
     [initialSeats, statusById]
   );
 
-  // If someone else takes a seat this user picked (but hasn't held yet), drop it
+  // A seat this customer picked may have gone to someone else. The map can be a
+  // few seconds old and their own released hold can look like a stranger's, so
+  // ask again before telling them they lost it.
+  const checkingLostSeats = useRef(false);
   useEffect(() => {
-    const lost = Array.from(selectedSeats).filter((id) => {
+    const suspects = Array.from(selectedSeats).filter((id) => {
       const status = statusById?.[id];
       return status === 'booked' || (status === 'locked' && !heldByMe.has(id));
     });
-    if (lost.length > 0) {
-      setSelectedSeats(prev => new Set(Array.from(prev).filter(id => !lost.includes(id))));
-      showToast('A seat you picked was just taken by another customer.', 'info');
-    }
-  }, [statusById, selectedSeats, heldByMe, showToast]);
+    if (suspects.length === 0 || checkingLostSeats.current) return;
+
+    checkingLostSeats.current = true;
+    freshRead.current = true;
+    Promise.all([
+      queryClient.fetchQuery({ queryKey: seatsKey, queryFn: fetchStatuses, staleTime: 0 }),
+      queryClient.fetchQuery({ queryKey: holdsKey, queryFn: fetchHolds, staleTime: 0 }),
+    ]).then(([latest, mine]) => {
+      const lost = suspects.filter(id => latest[id] === 'booked' || (latest[id] === 'locked' && !mine.includes(id)));
+      if (lost.length > 0) {
+        setSelectedSeats(prev => new Set(Array.from(prev).filter(id => !lost.includes(id))));
+        showToast('A seat you picked was just taken by another customer.', 'info');
+      }
+    }).catch(() => {
+      // Offline: Continue asks the server anyway, and it won't sell a taken seat
+    }).finally(() => { checkingLostSeats.current = false; });
+  }, [statusById, selectedSeats, heldByMe, showToast, queryClient, seatsKey, holdsKey, fetchStatuses, fetchHolds]);
+
+  // Deselecting a held seat lets it go right away, instead of keeping everyone
+  // else off it until the hold runs out.
+  const releaseSeat = (layoutId: string) => {
+    queryClient.setQueryData<string[]>(holdsKey, ids => ids?.filter(id => id !== layoutId));
+    queryClient.setQueryData<SeatStatuses>(seatsKey, statuses => statuses && { ...statuses, [layoutId]: 'available' });
+    authHeaders()
+      .then(headers => fetch('/api/seats/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ showId: show.id, seatLayoutIds: [layoutId] }),
+        keepalive: true,
+      }))
+      .catch(() => {
+        // The hold ends on its own
+      })
+      .finally(() => {
+        freshRead.current = true;
+        queryClient.invalidateQueries({ queryKey: seatsKey });
+      });
+  };
 
   // ── SEAT SELECTION ───────────────────────────────────────────
   const handleSeatClick = (seat: SeatStatusType) => {
@@ -112,6 +181,7 @@ export default function SeatingMapClient({ show, initialSeats, showStarted = fal
 
     if (newSelected.has(layoutId)) {
       newSelected.delete(layoutId);
+      if (heldByMe.has(layoutId)) releaseSeat(layoutId);
     } else {
       if (newSelected.size >= MAX_SEATS) {
         showToast(`You can select a maximum of ${MAX_SEATS} seats per booking.`, 'info');
@@ -130,21 +200,19 @@ export default function SeatingMapClient({ show, initialSeats, showStarted = fal
       return;
     }
 
+    // Guests are told apart by a cookie, so without cookies a seat can't be held for them
+    if (!cookiesWork()) {
+      setCookiesBlocked(true);
+      return;
+    }
+    setCookiesBlocked(false);
+
     setSubmitting(true);
     try {
-      let token = '';
-      if (!isMockMode && user) {
-        const { data } = await supabaseClient.auth.getSession();
-        token = data.session?.access_token || '';
-      }
-
       // Guests are identified by an httpOnly cookie the server sets on this call
       const lockRes = await fetch('/api/seats/lock', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         body: JSON.stringify({ showId: show.id, seatLayoutIds: Array.from(selectedSeats) })
       });
 
@@ -153,12 +221,15 @@ export default function SeatingMapClient({ show, initialSeats, showStarted = fal
         throw new Error(errData.error || 'Failed to hold the selected seats.');
       }
 
-      setHeldByMe(new Set(selectedSeats));
+      queryClient.setQueryData<string[]>(holdsKey, Array.from(selectedSeats));
       router.push(`/booking/checkout?showId=${show.id}&seats=${Array.from(selectedSeats).join(',')}`);
     } catch (err: any) {
       console.error(err);
-      showToast(err.message || 'Failed to hold seats. Please try another seat.', 'error');
-      queryClient.invalidateQueries({ queryKey: ['seats', show.id] });
+      const offline = err instanceof TypeError;
+      showToast(offline ? 'We couldn’t reach the server. Check your connection and try again.' : err.message || 'Failed to hold seats. Please try another seat.', 'error');
+      freshRead.current = true;
+      queryClient.invalidateQueries({ queryKey: seatsKey });
+      queryClient.invalidateQueries({ queryKey: holdsKey });
       setSubmitting(false);
     }
   };
@@ -216,6 +287,23 @@ export default function SeatingMapClient({ show, initialSeats, showStarted = fal
           <TriangleAlert aria-hidden />
           <div>
             <strong>This show is full.</strong> Seats on hold may open up again in a few minutes.{' '}
+            <Link href={otherTimes} className={styles.inlineLink}>Try another showtime</Link>
+          </div>
+        </div>
+      )}
+      {cookiesBlocked && (
+        <div className="notice notice-danger" role="alert">
+          <TriangleAlert aria-hidden />
+          <div>
+            <strong>Your browser is blocking cookies.</strong> We use one to hold your seats while you pay. Allow cookies for this site, then press Continue again.
+          </div>
+        </div>
+      )}
+      {seats.length === 0 && (
+        <div className="notice notice-accent" role="status">
+          <TriangleAlert aria-hidden />
+          <div>
+            <strong>Seats for this show aren&apos;t available online.</strong>{' '}
             <Link href={otherTimes} className={styles.inlineLink}>Try another showtime</Link>
           </div>
         </div>

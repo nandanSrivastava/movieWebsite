@@ -22,9 +22,9 @@
 
 .actions { display: flex; flex-direction: column; gap: 10px; }
 .actions > :first-child { width: 100%; }
-.secondary { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.secondary { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .secondary > * { width: 100%; }
-.secondary > :only-child { grid-column: span 2; }
+.secondary > :only-child { grid-column: 1 / -1; }
 
 .help {
   font-size: var(--fs-sm);
@@ -60,6 +60,8 @@
 .danger { background: var(--danger-bg); color: var(--danger); }
 .stateTitle { font-size: var(--fs-2xl); }
 .stateBody { color: var(--text-secondary); line-height: 1.6; }
+.stateBody strong { color: var(--text-primary); font-weight: 600; word-break: break-word; }
+.stateBody a { color: var(--accent-ink); text-decoration: underline; text-underline-offset: 3px; }
 .stateActions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 8px; }
 
 .bigSpinner { width: 40px; height: 40px; border-width: 3px; color: var(--accent); margin-bottom: 8px; }

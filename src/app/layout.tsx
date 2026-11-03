@@ -8,19 +8,21 @@ import { QueryProvider } from "@/features/shared/components/QueryProvider";
 import { Mukta, Rozha_One } from "next/font/google";
 import { ThemeProvider } from "@/features/shared/components/ThemeProvider";
 import { Analytics } from "@vercel/analytics/next";
+import { PUBLIC_SITE_URL } from "@/lib/siteUrl";
 
 // Display: Rozha One (Hindi film title-card face). Text: Mukta (by Ek Type).
-// Both carry Devanagari, so Hindi labels render in the same voice.
+// Both carry Devanagari, so Hindi labels render in the same voice. Only Latin is
+// preloaded; the Devanagari files still download on a page that actually uses them.
 const rozha = Rozha_One({
   weight: "400",
-  subsets: ["latin", "devanagari"],
+  subsets: ["latin"],
   variable: "--font-rozha",
   display: "swap",
 });
 
 const mukta = Mukta({
   weight: ["400", "500", "600", "700"],
-  subsets: ["latin", "devanagari"],
+  subsets: ["latin"],
   variable: "--font-mukta",
   display: "swap",
 });
@@ -34,7 +36,8 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://dhrubcineplex.in"),
+  metadataBase: new URL(PUBLIC_SITE_URL),
+  alternates: { canonical: "./" },
   title: {
     default: "Dhrub Cineplex | Premium Movie Experience in Bagaha",
     template: "%s | Dhrub Cineplex",
@@ -46,7 +49,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: "website",
     locale: "en_IN",
-    url: "https://dhrubcineplex.in",
+    url: PUBLIC_SITE_URL,
     title: "Dhrub Cineplex | Premium Movie Experience",
     description: "Book tickets online for the latest blockbusters with premium recliners and Dolby Atmos sound.",
     siteName: "Dhrub Cineplex",
@@ -94,8 +97,8 @@ export default function RootLayout({
               "@type": "MovieTheater",
               "name": "Dhrub Cineplex",
               "alternateName": "Dhruv Cineplex",
-              "url": "https://dhrubcineplex.in",
-              "logo": "https://dhrubcineplex.in/logo.jpeg",
+              "url": PUBLIC_SITE_URL,
+              "logo": `${PUBLIC_SITE_URL}/logo.jpeg`,
               "address": {
                 "@type": "PostalAddress",
                 "addressLocality": "Bagaha",
@@ -107,6 +110,11 @@ export default function RootLayout({
         />
       </head>
       <body>
+        <noscript>
+          <p className="notice notice-urgent" style={{ margin: 16 }}>
+            This site needs JavaScript to show seats and take payments. Please turn it on, or book at the counter: +91 99340 60014.
+          </p>
+        </noscript>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
           <ErrorBoundary>
             <QueryProvider>

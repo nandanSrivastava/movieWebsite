@@ -2,10 +2,10 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.cinebook.app',
-  appName: 'CineBook',
+  appName: 'Dhrub Cineplex',
   webDir: 'public',
   server: {
-    url: 'https://dhrub-talkies.vercel.app' // Deployed app URL (HTTPS — keep cleartext disabled)
+    url: 'https://www.dhrubcineplex.in' // Deployed app URL (HTTPS — keep cleartext disabled)
   }
 };
 

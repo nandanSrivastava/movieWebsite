@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { cache } from 'react';
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { db } from '@/lib/db';
 import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
+import StatusMessage from '@/features/shared/components/StatusMessage';
 import SeatingMapClient from '@/features/bookings/components/SeatingMapClient';
 import ShowSummaryHeader from '@/features/bookings/components/ShowSummaryHeader';
 import { hasShowStarted } from '@/features/shared/utils/format';
@@ -20,12 +22,41 @@ interface PageProps {
   params: Promise<{ showId: string }>;
 }
 
+// Metadata and the page ask for the same show; one database read serves both
+const getShow = cache((showId: string) => db.getShowById(showId));
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const show = await getShow((await params).showId);
+  return {
+    title: show?.movie?.title ? `Choose seats: ${show.movie.title}` : 'Choose seats',
+    // A seat map is only useful for a few days; the film's page is what should rank
+    robots: { index: false, follow: true },
+  };
+}
+
 export default async function BookingPage({ params }: PageProps) {
   const { showId } = await params;
 
-  const show = await db.getShowById(showId);
+  const show = await getShow(showId);
   if (!show) {
     notFound();
+  }
+
+  if (show.cancelled_at || show.movie?.is_active === false) {
+    return (
+      <>
+        <Header />
+        <StatusMessage
+          tone="danger"
+          title={show.cancelled_at ? 'This show has been cancelled' : 'This film is no longer showing'}
+          body={show.cancelled_at
+            ? "It can't be booked. Online payments are refunded automatically, and cash tickets are repaid at the counter."
+            : "It can't be booked online any more. Tickets already bought are still valid."}
+          actions={[{ href: '/movies', label: 'See what’s showing', primary: true }]}
+        />
+        <Footer />
+      </>
+    );
   }
 
   // Seat layout + status. Who holds or bought each seat stays on the server.

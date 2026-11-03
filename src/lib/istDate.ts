@@ -14,6 +14,23 @@ export function showStartsAt(showDate: string, showTime: string): Date {
 export const CHECK_IN_OPENS_BEFORE_MS = 3 * 60 * 60 * 1000;
 export const CHECK_IN_CLOSES_AFTER_MS = 4 * 60 * 60 * 1000;
 
+// Slots are about 3.5 hours apart, so that window also takes in the next show.
+// Inside these limits a ticket looks right for the show now letting people in.
+const GATE_EARLY_MS = 45 * 60 * 1000;
+const GATE_LATE_MS = 60 * 60 * 1000;
+
+/**
+ * Whether this ticket looks like it's for the show at the door now. 'early' and
+ * 'late' are still inside the entry window, but staff should look before admitting:
+ * the customer may be at the wrong show.
+ */
+export function gateTiming(showDate: string, showTime: string, now = Date.now()): 'on_time' | 'early' | 'late' {
+  const start = showStartsAt(showDate, showTime).getTime();
+  if (now < start - GATE_EARLY_MS) return 'early';
+  if (now > start + GATE_LATE_MS) return 'late';
+  return 'on_time';
+}
+
 export function checkInWindow(showDate: string, showTime: string, now = Date.now()): 'too_early' | 'open' | 'closed' {
   const start = showStartsAt(showDate, showTime).getTime();
   if (now < start - CHECK_IN_OPENS_BEFORE_MS) return 'too_early';

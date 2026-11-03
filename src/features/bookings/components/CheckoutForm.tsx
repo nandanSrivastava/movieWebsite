@@ -1,6 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { AlertCircle, Smartphone, CreditCard, Landmark, ShieldCheck, Banknote } from 'lucide-react';
+import { NAME_MAX_LENGTH } from '@/lib/contactRules';
 import styles from './CheckoutForm.module.css';
 
 export type FieldErrors = Partial<Record<'name' | 'phone' | 'email', string>>;
@@ -49,6 +50,7 @@ export default function CheckoutForm({
             className="form-control"
             autoComplete="name"
             autoCapitalize="words"
+            maxLength={NAME_MAX_LENGTH}
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
             onBlur={() => onFieldBlur('name')}
@@ -70,7 +72,7 @@ export default function CheckoutForm({
               className={`form-control ${styles.phoneInput}`}
               inputMode="numeric"
               autoComplete="tel-national"
-              maxLength={14}
+              maxLength={17}
               placeholder="98765 43210"
               value={customerPhone}
               onChange={(e) => setCustomerPhone(e.target.value.replace(/[^\d\s]/g, ''))}

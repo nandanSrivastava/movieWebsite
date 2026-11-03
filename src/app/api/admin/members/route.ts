@@ -155,6 +155,7 @@ export async function POST(req: NextRequest) {
       if (!supabaseAdmin) return misconfiguredResponse();
 
       let createdUserId: string | null = null;
+      let alreadyHadAccount = false;
 
       // 1. Create or find auth user in Supabase
       const { data: authUser, error: authErr } = await supabaseAdmin.auth.admin.createUser({
@@ -173,10 +174,11 @@ export async function POST(req: NextRequest) {
           /already (been )?registered/i.test(authErr.message);
 
         if (alreadyExists) {
-          // Promote the existing account to member (its password is unchanged).
+          // Promote the existing account to member. Their password stays theirs.
           const existingUser = await findAuthUserByEmail(supabaseAdmin, cleanEmail);
           if (existingUser) {
             createdUserId = existingUser.id;
+            alreadyHadAccount = true;
           } else {
             return NextResponse.json({ error: 'User is already registered.' }, { status: 400 });
           }
@@ -190,7 +192,17 @@ export async function POST(req: NextRequest) {
         createdUserId = authUser?.user?.id || null;
       }
 
-      if (createdUserId) {
+      // Their own name and phone stay as they are; only the role changes.
+      // An administrator is never turned into counter staff by accident.
+      const existingProfile = alreadyHadAccount && createdUserId ? await db.getProfile(createdUserId) : null;
+      if (existingProfile?.role === 'admin') {
+        return NextResponse.json({ error: 'That email belongs to an administrator, so it already has full access.' }, { status: 409 });
+      }
+
+      if (existingProfile) {
+        const promoted = await db.updateProfileRole(existingProfile.id, 'member');
+        newMember = { ...promoted, email: promoted.email || cleanEmail };
+      } else if (createdUserId) {
         // 2. Set profile role to 'member'
         const basePayload: any = {
           id: createdUserId,
@@ -248,5 +260,43 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error('Member onboarding error:', err);
     return NextResponse.json({ error: 'Failed to onboard member. Please try again.' }, { status: 500 });
+  }
+}
+
+/**
+ * Takes staff access away. The role is read on every request, so it applies at
+ * once. The account stays as an ordinary customer's: they may hold tickets.
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const { isAdmin, userId } = await getAdminUser(req);
+    if (!isAdmin) {
+      return NextResponse.json({ error: 'Unauthorized: Only admins can remove staff.' }, { status: 403 });
+    }
+
+    const id = req.nextUrl.searchParams.get('id');
+    if (!id) {
+      return NextResponse.json({ error: 'Member ID is required.' }, { status: 400 });
+    }
+
+    const profile = await db.getProfile(id);
+    if (!profile) {
+      return NextResponse.json({ error: 'That account no longer exists.' }, { status: 404 });
+    }
+    if (profile.role !== 'member') {
+      return NextResponse.json({ error: 'That account is not counter staff.' }, { status: 409 });
+    }
+
+    await db.updateProfileRole(id, 'user');
+    await db.logAudit(
+      userId,
+      'MEMBER_REMOVED',
+      { member_id: id, member_name: profile.full_name, member_email: profile.email },
+      req.headers.get('x-forwarded-for') || '127.0.0.1'
+    );
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('Remove member error:', err);
+    return NextResponse.json({ error: 'Could not remove this member. Please try again.' }, { status: 500 });
   }
 }

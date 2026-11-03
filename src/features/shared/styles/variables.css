@@ -5,7 +5,8 @@
    logo) as the one accent, ticket paper for text.
    ════════════════════════════════════════════════════════ */
 
-:root {
+:root,
+.force-dark {
   color-scheme: dark;
 
   /* ── PALETTE ────────────────────────────────────────── */
@@ -218,3 +219,6 @@
   --shadow-lg:  0 18px 48px rgba(42, 20, 32, 0.12);
   --shadow-xl:  0 28px 72px rgba(42, 20, 32, 0.16);
 }
+
+/* Text inherited from the page would keep the light theme's colour on a dark panel */
+.force-dark { color: var(--text-primary); }

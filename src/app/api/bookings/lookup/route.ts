@@ -4,10 +4,13 @@ import { db } from '@/lib/db';
 import { rateLimit } from '@/lib/rateLimit';
 import { getClientIp } from '@/lib/requestAuth';
 import { sendTicketLookupEmails } from '@/lib/mailer';
+import { isValidMobile, toMobileDigits } from '@/lib/contactRules';
 
 const lookupSchema = z.object({
   phone: z.string().min(10).max(20),
 });
+
+const NOT_A_NUMBER = 'Please enter your full 10-digit mobile number.';
 
 const GENERIC_REPLY = {
   ok: true,
@@ -27,14 +30,14 @@ export async function POST(req: NextRequest) {
     if (limitedIp) return limitedIp;
 
     const result = lookupSchema.safeParse(await req.json().catch(() => null));
-    const digits = result.success ? result.data.phone.replace(/\D/g, '') : '';
-    if (digits.length < 10) {
-      return NextResponse.json({ error: 'Please enter your full 10-digit mobile number.' }, { status: 400 });
+    // The subscriber number, whatever prefix was typed or stored
+    const phoneDigits = toMobileDigits(result.success ? result.data.phone : '');
+    if (!isValidMobile(phoneDigits)) {
+      return NextResponse.json({ error: NOT_A_NUMBER }, { status: 400 });
     }
-    // Last 10 digits = the subscriber number, whatever prefix was typed or stored
-    const phoneDigits = digits.slice(-10);
 
-    const limitedPhone = await rateLimit(`lookup:phone:${phoneDigits}`, 3, 3600, 'Tickets for this number were sent recently. Please check your email.');
+    // Says nothing about whether this number has tickets
+    const limitedPhone = await rateLimit(`lookup:phone:${phoneDigits}`, 3, 3600, 'This number was looked up several times just now. Please check your email, or try again in an hour.');
     if (limitedPhone) return limitedPhone;
 
     // Send after responding, so the reply looks the same whether or not tickets exist

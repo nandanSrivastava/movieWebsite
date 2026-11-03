@@ -1,6 +1,7 @@
 .wrap {
   position: relative;
   width: 100%;
+  container-type: inline-size;
 }
 
 .toolbar {
@@ -13,6 +14,11 @@
 .hint {
   font-size: var(--fs-sm);
   color: var(--text-muted);
+}
+/* Wide enough to tap seats at full view: TAP_ZOOM_THRESHOLD × HALL_WIDTH in SeatingGrid.tsx.
+   CSS rather than state, so the toolbar's space is right from the first paint. */
+@container (min-width: 583.5px) {
+  .toolbar { display: none; }
 }
 
 .viewport {

@@ -3,12 +3,16 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { getClientIp, getHoldOwner } from '@/lib/requestAuth';
 
-const unlockRequestSchema = z.object({
-  showId: z.string().min(1).max(100),
-  seatLayoutIds: z.array(z.string().min(1).max(100)).min(1).max(200),
-  // Staff only: release holds that belong to someone else (never touches sold seats)
-  force: z.boolean().optional(),
-});
+const unlockRequestSchema = z.union([
+  z.object({
+    showId: z.string().min(1).max(100),
+    seatLayoutIds: z.array(z.string().min(1).max(100)).min(1).max(200),
+    // Staff only: release holds that belong to someone else (never touches sold seats)
+    force: z.boolean().optional(),
+  }),
+  // Everything this customer holds: they're signing out
+  z.object({ all: z.literal(true) }),
+]);
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,9 +20,13 @@ export async function POST(req: NextRequest) {
     if (!result.success) {
       return NextResponse.json({ error: 'Invalid inputs' }, { status: 400 });
     }
-    const { showId, seatLayoutIds, force } = result.data;
-
     const { owner, user } = await getHoldOwner(req, false);
+
+    if ('all' in result.data) {
+      if (owner) await db.releaseSeatHolds(null, null, owner);
+      return NextResponse.json({ success: true });
+    }
+    const { showId, seatLayoutIds, force } = result.data;
 
     if (force) {
       if (!user || user.role !== 'admin') {

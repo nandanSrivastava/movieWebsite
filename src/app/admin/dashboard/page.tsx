@@ -11,9 +11,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import AdminForms from '@/features/admin/components/AdminForms';
 import AdminStats from '@/features/admin/components/AdminStats';
 import AdminTables from '@/features/admin/components/AdminTables';
+import AdminBookings from '@/features/admin/components/AdminBookings';
+import { useAdminStore } from '@/features/admin/store/adminStore';
 import { useToast } from '@/features/shared/context/ToastContext';
 
-type TabType = 'overview' | 'showtimes' | 'movies' | 'staff' | 'audit';
+type TabType = 'overview' | 'bookings' | 'showtimes' | 'movies' | 'staff' | 'audit';
 
 const getAuthHeaders = async (customHeaders: Record<string, string> = {}) => {
   const headers: Record<string, string> = { ...customHeaders };
@@ -62,7 +64,7 @@ const fetchDashboardData = async () => {
 
 export default function AdminDashboardPage() {
   const router = useRouter();
-  const { user, loading: authLoading } = useCineBookAuth();
+  const { user, loading: authLoading, sessionCheckFailed, retrySessionCheck } = useCineBookAuth();
   const { showToast } = useToast();
   const queryClient = useQueryClient();
 
@@ -72,7 +74,7 @@ export default function AdminDashboardPage() {
   const [initialized, setInitialized] = useState(false);
 
   // React Query for dashboard data
-  const { data, isLoading: loading } = useQuery({
+  const { data, isLoading: loading, isError: dashboardFailed } = useQuery({
     queryKey: ['adminDashboard'],
     queryFn: fetchDashboardData,
     enabled: !!user && user.role === 'admin',
@@ -90,21 +92,28 @@ export default function AdminDashboardPage() {
 
   // Wait for auth to finish loading, mark as initialized, THEN redirect if not admin.
   useEffect(() => {
-    if (authLoading) return;
+    // A failed check isn't a refusal: the admin gets a retry below, not the login page
+    if (authLoading || sessionCheckFailed) return;
     setInitialized(true);
-    if (!user || user.role !== 'admin') {
-      router.replace('/login?error=unauthorized');
-    }
-  }, [user, authLoading, router]);
+    if (!user) router.replace('/login?redirect=/admin/dashboard');
+    else if (user.role !== 'admin') router.replace('/login?error=unauthorized');
+  }, [user, authLoading, sessionCheckFailed, router]);
 
   // When switching tabs, close any open creation form
+  const closeForm = () => {
+    setIsFormOpen(false);
+    // Leaving an edit behind would make the next "Add New Movie" change that film
+    if (useAdminStore.getState().editingMovieId) useAdminStore.getState().resetMovieForm();
+  };
+
   const handleTabSwitch = (tab: TabType) => {
     setActiveTab(tab);
-    setIsFormOpen(false);
+    closeForm();
   };
 
   const handleToggleForm = () => {
-    setIsFormOpen(!isFormOpen);
+    if (isFormOpen) closeForm();
+    else setIsFormOpen(true);
   };
 
   // Handle Manual Seat Unlock Override
@@ -139,14 +148,29 @@ export default function AdminDashboardPage() {
   };
 
   // Totals are counted from bookings in the database (all time)
-  const totalPaidRevenue = data?.stats?.paidRevenue ?? 0;
-  const totalTicketsSold = data?.stats?.ticketsSold ?? 0;
+  const stats = data?.stats ?? null;
+
+  if (sessionCheckFailed && !user) {
+    return (
+      <>
+        <Header />
+        <div className="force-dark" style={{ display: 'flex', minHeight: '80vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-primary)', padding: '16px' }}>
+          <div role="alert" style={{ textAlign: 'center' }}>
+            <h3 style={{ marginBottom: '8px' }}>We couldn&apos;t check your sign-in</h3>
+            <p style={{ color: 'var(--text-secondary)', marginBottom: '14px' }}>This is a connection problem. Check your internet and try again.</p>
+            <button type="button" className="btn btn-primary" onClick={retrySessionCheck}>Try again</button>
+          </div>
+        </div>
+        <Footer />
+      </>
+    );
+  }
 
   if (!initialized || loading || authLoading || !user || user.role !== 'admin') {
     return (
       <>
         <Header />
-        <div style={{ display: 'flex', minHeight: '80vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-primary)', color: '#FFFFFF' }}>
+        <div className="force-dark" style={{ display: 'flex', minHeight: '80vh', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-primary)', color: '#FFFFFF' }}>
           <h3>Loading administrative dashboard telemetry...</h3>
         </div>
         <Footer />
@@ -156,6 +180,7 @@ export default function AdminDashboardPage() {
 
   const TABS = [
     { id: 'overview', label: '📊 Overview', badge: null },
+    { id: 'bookings', label: '🎟️ Bookings', badge: null },
     { id: 'showtimes', label: '⏰ Showtimes', badge: shows.length },
     { id: 'movies', label: '🎬 Movie Catalog', badge: moviesList.length },
     { id: 'staff', label: '👥 Counter Staff', badge: membersList.length },
@@ -165,7 +190,8 @@ export default function AdminDashboardPage() {
   return (
     <>
       <Header />
-      <main style={{ backgroundColor: 'var(--bg-primary)', color: '#FFFFFF', minHeight: 'calc(100vh - 180px)', padding: '36px 20px' }}>
+      {/* Always the dark palette: these screens hard-code light text on dark panels */}
+      <main className="force-dark" style={{ backgroundColor: 'var(--bg-primary)', color: '#FFFFFF', minHeight: 'calc(100vh - 180px)', padding: '36px 20px' }}>
         <div className="container">
           
           {/* TITLE HEADER BAR */}
@@ -179,11 +205,13 @@ export default function AdminDashboardPage() {
           </div>
 
           {/* TELEMETRY STAT CARDS */}
-          <AdminStats 
-            totalPaidRevenue={totalPaidRevenue} 
-            totalTicketsSold={totalTicketsSold} 
-            activeLocksCount={activeLocks.length} 
-          />
+          {dashboardFailed && !data && (
+            <div className="notice notice-danger" role="alert" style={{ marginBottom: '20px' }}>
+              <div>Couldn&apos;t reach the server, so the figures below aren&apos;t up to date. It keeps trying by itself.</div>
+            </div>
+          )}
+
+          <AdminStats stats={stats} activeLocksCount={activeLocks.length} />
 
           {/* SEGMENTED TAB NAVIGATION BAR */}
           <div 
@@ -225,7 +253,7 @@ export default function AdminDashboardPage() {
                   {tab.badge !== null && (
                     <span style={{
                       backgroundColor: isActive ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.1)',
-                      color: isActive ? '#08080F' : 'var(--text-muted)',
+                      color: isActive ? '#08080F' : 'var(--text-secondary)',
                       padding: '2px 7px',
                       borderRadius: '10px',
                       fontSize: '0.75rem',
@@ -245,8 +273,10 @@ export default function AdminDashboardPage() {
             screensList={screensList} 
             activeTab={activeTab}
             isFormOpen={isFormOpen}
-            onCloseForm={() => setIsFormOpen(false)}
+            onCloseForm={closeForm}
           />
+
+          {activeTab === 'bookings' && <AdminBookings />}
 
           {/* TAB CONTENT & DATA TABLES */}
           <AdminTables 
@@ -258,6 +288,7 @@ export default function AdminDashboardPage() {
             activeTab={activeTab}
             isFormOpen={isFormOpen}
             onToggleForm={handleToggleForm}
+            onOpenForm={() => setIsFormOpen(true)}
             actioning={actioning} 
             handleForceReleaseHold={handleForceReleaseHold} 
           />

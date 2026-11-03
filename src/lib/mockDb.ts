@@ -1,12 +1,16 @@
 import 'server-only';
 import {
   Movie, Screen, SeatLayout, Show, SeatStatus, Booking, Profile, AuditLog, DatabaseClient,
-  LockResult, FinalizeResult, SeatAvailability, SeatHold, ActiveLock, SalesSummary, PendingBookingResult
+  LockResult, FinalizeResult, SeatAvailability, SeatHold, ActiveLock, SalesSummary, PendingBookingResult,
+  CancelShowResult, MAX_TICKET_EMAIL_ATTEMPTS
 } from './types';
 
-import { istDateString } from './istDate';
+import { istDateString, showStartsAt } from './istDate';
+import { matchHolderBooking, ticketStillUsable } from './bookingAccess';
 
 const HOLD_MS = 8 * 60 * 1000;
+const HOLD_WINDOW_MS = 25 * 60 * 1000;
+const HOLD_COOLDOWN_MS = 10 * 60 * 1000;
 const MAX_SEATS_PER_OWNER = 10;
 const MAX_SEATS_PER_IP = 24;
 
@@ -26,6 +30,9 @@ export class MockDatabase implements DatabaseClient {
   private processedWebhookEvents = new Set<string>();
   private lockIps = new Map<string, string | null>(); // key: show_id:seat_layout_id
   private rateLimits = new Map<string, number>();
+  private holdWindows = new Map<string, number>(); // key: owner:show_id → window start
+  private ticketEmailAttempts = new Map<string, number>();
+  private refundEmailsSent = new Set<string>();
 
   constructor() {
     this.seed();
@@ -255,6 +262,10 @@ export class MockDatabase implements DatabaseClient {
     return Array.from(this.movies.values()).filter(m => m.is_active);
   }
 
+  public async getAllMovies(): Promise<Movie[]> {
+    return Array.from(this.movies.values());
+  }
+
   public async getMovieById(id: string): Promise<Movie | null> {
     return this.movies.get(id) || null;
   }
@@ -306,20 +317,26 @@ export class MockDatabase implements DatabaseClient {
 
   public async getShows(fromDate?: string): Promise<Show[]> {
     return Array.from(this.shows.values())
-      .filter(s => !fromDate || s.show_date >= fromDate)
+      .filter(s => !s.cancelled_at && (!fromDate || s.show_date >= fromDate))
       .sort((a, b) => `${a.show_date}${a.show_time}`.localeCompare(`${b.show_date}${b.show_time}`))
       .map(s => this.enrichShow(s));
   }
 
   public async getShowsForDate(date: string): Promise<Show[]> {
     return Array.from(this.shows.values())
-      .filter(s => s.show_date === date)
+      .filter(s => !s.cancelled_at && s.show_date === date)
       .map(s => this.enrichShow(s));
   }
 
   public async getShowsForMovie(movieId: string): Promise<Show[]> {
     return Array.from(this.shows.values())
-      .filter(s => s.movie_id === movieId)
+      .filter(s => !s.cancelled_at && s.movie_id === movieId)
+      .map(s => this.enrichShow(s));
+  }
+
+  public async getShowsForScreen(screenId: string, fromDate: string, toDate: string): Promise<Show[]> {
+    return Array.from(this.shows.values())
+      .filter(s => !s.cancelled_at && s.screen_id === screenId && s.show_date >= fromDate && s.show_date <= toDate)
       .map(s => this.enrichShow(s));
   }
 
@@ -351,14 +368,42 @@ export class MockDatabase implements DatabaseClient {
     return this.enrichShow(newShow);
   }
 
-  public async deleteShow(id: string): Promise<boolean> {
-    this.shows.delete(id);
-    for (const key of Array.from(this.seatStatuses.keys())) {
-      if (key.startsWith(`${id}:`)) {
-        this.seatStatuses.delete(key);
+  // Mirrors public.cancel_show() in supabase/migrations/006_payment_and_hold_fixes.sql
+  public async cancelShow(id: string): Promise<CancelShowResult> {
+    const show = this.shows.get(id);
+    if (!show) return { status: 'not_found', onlineRefunds: 0, cashRefunds: 0 };
+
+    const bookings = Array.from(this.bookings.values()).filter(b => b.show_id === id);
+    if (bookings.length === 0) {
+      this.shows.delete(id);
+      for (const key of Array.from(this.seatStatuses.keys())) {
+        if (key.startsWith(`${id}:`)) this.seatStatuses.delete(key);
+      }
+      return { status: 'deleted', onlineRefunds: 0, cashRefunds: 0 };
+    }
+
+    if (showStartsAt(show.show_date, show.show_time).getTime() <= Date.now() && bookings.some(b => b.payment_status === 'paid')) {
+      return { status: 'already_started', onlineRefunds: 0, cashRefunds: 0 };
+    }
+
+    show.cancelled_at = show.cancelled_at || new Date().toISOString();
+    for (const [key, st] of this.seatStatuses.entries()) {
+      if (st.show_id === id && st.status === 'locked') this.clearHold(key, st);
+    }
+    let onlineRefunds = 0;
+    let cashRefunds = 0;
+    for (const b of bookings.filter(item => item.payment_status === 'paid')) {
+      if (b.razorpay_payment_id?.startsWith('pay_cash_')) {
+        b.payment_status = 'refunded';
+        b.refund_reason = 'show_cancelled_cash';
+        cashRefunds++;
+      } else {
+        b.payment_status = 'refund_pending';
+        b.refund_reason = 'show_cancelled';
+        onlineRefunds++;
       }
     }
-    return true;
+    return { status: 'cancelled', onlineRefunds, cashRefunds };
   }
 
   private enrichShow(show: Show): Show {
@@ -413,14 +458,23 @@ export class MockDatabase implements DatabaseClient {
       .map(s => ({ seat_layout_id: s.seat_layout_id, lock_expires_at: s.lock_expires_at! }));
   }
 
-  // Mirrors public.lock_seats() in supabase/migrations/002_launch_hardening.sql
+  private holdLimit(showId: string, owner: string): number | null {
+    const started = this.holdWindows.get(`${owner}:${showId}`);
+    return started === undefined ? null : started + HOLD_WINDOW_MS;
+  }
+
+  private seatKey(bookingId: string) {
+    return this.bookingSeats.filter(bs => bs.booking_id === bookingId).map(bs => bs.seat_layout_id).sort().join(',');
+  }
+
+  // Mirrors public.lock_seats() in supabase/migrations/006_payment_and_hold_fixes.sql
   public async lockSeats(showId: string, seatLayoutIds: string[], owner: string, clientIp: string | null): Promise<LockResult> {
     this.sweepExpiredLocks();
     const ids = Array.from(new Set(seatLayoutIds));
     if (!owner || ids.length === 0 || ids.length > MAX_SEATS_PER_OWNER) return 'invalid';
 
     const show = this.shows.get(showId);
-    if (!show) return 'invalid';
+    if (!show || show.cancelled_at || this.movies.get(show.movie_id)?.is_active === false) return 'invalid';
     if (new Date(`${show.show_date}T${show.show_time}+05:30`).getTime() < Date.now()) return 'show_started';
 
     const targets = ids.map(id => this.seatStatuses.get(`${showId}:${id}`));
@@ -428,12 +482,25 @@ export class MockDatabase implements DatabaseClient {
     if (targets.some(t => t!.status === 'booked' || (this.isActiveHold(t!) && t!.locked_by !== owner))) return 'taken';
 
     const active = Array.from(this.seatStatuses.entries()).filter(([, st]) => this.isActiveHold(st));
-    const ownerHeld = active.filter(([, st]) => st.locked_by === owner && st.show_id !== showId).length;
-    if (ownerHeld + ids.length > MAX_SEATS_PER_OWNER) return 'owner_cap';
     if (clientIp) {
       const ipHeld = active.filter(([key, st]) =>
         this.lockIps.get(key) === clientIp && !(st.show_id === showId && st.locked_by === owner)).length;
       if (ipHeld + ids.length > MAX_SEATS_PER_IP) return 'ip_cap';
+    }
+
+    const windowKey = `${owner}:${showId}`;
+    const role = this.profiles.get(owner)?.role;
+    if (role !== 'admin' && role !== 'member') {
+      const limit = this.holdLimit(showId, owner);
+      if (limit === null || limit + HOLD_COOLDOWN_MS <= Date.now()) this.holdWindows.set(windowKey, Date.now());
+      if (this.holdLimit(showId, owner)! <= Date.now()) return 'hold_limit';
+    }
+
+    const ownerHeld = active.filter(([, st]) => st.locked_by === owner && st.show_id !== showId);
+    if (ownerHeld.length + ids.length > MAX_SEATS_PER_OWNER) {
+      for (const otherShow of new Set(ownerHeld.map(([, st]) => st.show_id))) {
+        await this.releaseSeatHolds(otherShow, null, owner);
+      }
     }
 
     for (const [key, st] of this.seatStatuses.entries()) {
@@ -442,21 +509,31 @@ export class MockDatabase implements DatabaseClient {
       }
     }
 
-    const expiresAt = new Date(Date.now() + HOLD_MS).toISOString();
+    const limit = this.holdLimit(showId, owner) ?? Infinity;
     ids.forEach((id) => {
       const st = this.seatStatuses.get(`${showId}:${id}`)!;
+      const current = st.locked_by === owner && this.isActiveHold(st) ? new Date(st.lock_expires_at!).getTime() : 0;
       st.status = 'locked';
       st.locked_by = owner;
       st.locked_at = new Date().toISOString();
-      st.lock_expires_at = expiresAt;
+      st.lock_expires_at = new Date(Math.min(Math.max(current, Date.now() + HOLD_MS), limit)).toISOString();
       this.lockIps.set(`${showId}:${id}`, clientIp);
     });
+
+    const wanted = [...ids].sort().join(',');
+    for (const b of this.bookings.values()) {
+      if (b.hold_owner === owner && b.show_id === showId && b.payment_status === 'pending' && !b.superseded_at && this.seatKey(b.id) !== wanted) {
+        b.superseded_at = new Date().toISOString();
+      }
+    }
     return 'ok';
   }
 
   public async extendSeatHolds(showId: string, seatLayoutIds: string[], owner: string, seconds: number): Promise<string | null> {
     this.sweepExpiredLocks();
-    const expires = new Date(Date.now() + Math.min(Math.max(seconds, 60), 1200) * 1000).toISOString();
+    const expiresMs = Math.min(Date.now() + Math.min(Math.max(seconds, 60), 1200) * 1000, this.holdLimit(showId, owner) ?? Infinity);
+    if (expiresMs <= Date.now()) return null;
+    const expires = new Date(expiresMs).toISOString();
     const held = seatLayoutIds
       .map(id => this.seatStatuses.get(`${showId}:${id}`))
       .filter(st => st && st.locked_by === owner && this.isActiveHold(st)) as SeatStatus[];
@@ -464,12 +541,39 @@ export class MockDatabase implements DatabaseClient {
     return held.length === new Set(seatLayoutIds).size ? expires : null;
   }
 
-  public async releaseSeatHolds(showId: string, seatLayoutIds: string[], owner: string): Promise<void> {
-    seatLayoutIds.forEach((id) => {
-      const key = `${showId}:${id}`;
-      const st = this.seatStatuses.get(key);
-      if (st && st.status === 'locked' && st.locked_by === owner) this.clearHold(key, st);
-    });
+  public async releaseSeatHolds(showId: string | null, seatLayoutIds: string[] | null, owner: string): Promise<void> {
+    for (const [key, st] of this.seatStatuses.entries()) {
+      if (st.status === 'locked' && st.locked_by === owner
+          && (showId === null || st.show_id === showId)
+          && (seatLayoutIds === null || seatLayoutIds.includes(st.seat_layout_id))) {
+        this.clearHold(key, st);
+      }
+    }
+    for (const b of this.bookings.values()) {
+      if (b.hold_owner === owner && b.payment_status === 'pending' && !b.superseded_at
+          && (showId === null || b.show_id === showId)
+          && (seatLayoutIds === null || this.bookingSeats.some(bs => bs.booking_id === b.id && seatLayoutIds.includes(bs.seat_layout_id)))) {
+        b.superseded_at = new Date().toISOString();
+      }
+    }
+  }
+
+  public async adoptGuestHolds(guestId: string, userId: string): Promise<void> {
+    for (const st of this.seatStatuses.values()) {
+      if (st.locked_by === guestId && this.isActiveHold(st)) st.locked_by = userId;
+    }
+    for (const b of this.bookings.values()) {
+      if (b.hold_owner === guestId && b.payment_status === 'pending') {
+        b.hold_owner = userId;
+        b.booked_by = b.booked_by ?? userId;
+      }
+    }
+    for (const [key, started] of Array.from(this.holdWindows.entries())) {
+      if (!key.startsWith(`${guestId}:`)) continue;
+      const moved = `${userId}:${key.slice(guestId.length + 1)}`;
+      if (!this.holdWindows.has(moved)) this.holdWindows.set(moved, started);
+      this.holdWindows.delete(key);
+    }
   }
 
   public async forceReleaseSeatHolds(showId: string, seatLayoutIds: string[]): Promise<void> {
@@ -512,7 +616,7 @@ export class MockDatabase implements DatabaseClient {
   }
 
   // ── BOOKING MANAGEMENT ─────────────────────────────────────
-  // Mirrors public.create_pending_booking() in supabase/migrations/004_abuse_and_performance.sql
+  // Mirrors public.create_pending_booking() in supabase/migrations/006_payment_and_hold_fixes.sql
   public async createPendingBooking(params: Parameters<DatabaseClient['createPendingBooking']>[0]): Promise<PendingBookingResult> {
     const { showId, userId, holdOwner, channel, name, phone, email, idempotencyKey, holdSeconds } = params;
     const ids = Array.from(new Set(params.seatLayoutIds)).sort();
@@ -520,25 +624,28 @@ export class MockDatabase implements DatabaseClient {
     if (!holdOwner || ids.length === 0 || ids.length > 10) return invalid;
 
     const show = this.shows.get(showId);
-    if (!show) return invalid;
+    if (!show || show.cancelled_at || this.movies.get(show.movie_id)?.is_active === false) return invalid;
     if (new Date(`${show.show_date}T${show.show_time}+05:30`).getTime() < Date.now()) {
       return { status: 'show_started', booking: null, holdExpiresAt: null };
     }
 
     let existing = Array.from(this.bookings.values()).find(b => b.client_idempotency_key === idempotencyKey);
-    if (existing && existing.hold_owner !== holdOwner) return invalid;
+    if (existing && (existing.hold_owner !== holdOwner || this.seatKey(existing.id) !== ids.join(','))) return invalid;
     if (existing?.payment_status === 'paid') return { status: 'existing', booking: existing, holdExpiresAt: null };
 
     const holdExpiresAt = await this.extendSeatHolds(showId, ids, holdOwner, holdSeconds);
     if (!holdExpiresAt) return { status: 'hold_expired', booking: null, holdExpiresAt: null };
-    if (existing) return { status: 'existing', booking: existing, holdExpiresAt };
+    if (existing) {
+      if (existing.payment_status === 'pending') {
+        Object.assign(existing, { customer_name: name, customer_phone: phone, customer_email: email, booking_channel: channel, superseded_at: null });
+      }
+      return { status: 'existing', booking: existing, holdExpiresAt };
+    }
 
-    const seatKey = (bookingId: string) =>
-      this.bookingSeats.filter(bs => bs.booking_id === bookingId).map(bs => bs.seat_layout_id).sort().join(',');
     existing = Array.from(this.bookings.values()).find(b =>
       b.hold_owner === holdOwner && b.show_id === showId && b.booking_channel === channel &&
-      b.payment_status === 'pending' && Date.now() - new Date(b.created_at).getTime() < 30 * 60 * 1000 &&
-      seatKey(b.id) === ids.join(','));
+      b.payment_status === 'pending' && !b.superseded_at && Date.now() - new Date(b.created_at).getTime() < 30 * 60 * 1000 &&
+      this.seatKey(b.id) === ids.join(','));
     if (existing) {
       Object.assign(existing, { customer_name: name, customer_phone: phone, customer_email: email });
       return { status: 'existing', booking: existing, holdExpiresAt };
@@ -577,12 +684,34 @@ export class MockDatabase implements DatabaseClient {
     return { status: 'ok', booking, holdExpiresAt };
   }
 
-  public async setBookingOrderId(bookingId: string, orderId: string): Promise<void> {
+  public async setBookingOrderId(bookingId: string, orderId: string): Promise<string> {
     const booking = this.bookings.get(bookingId);
-    if (booking) booking.razorpay_order_id = orderId;
+    if (!booking) return orderId;
+    booking.razorpay_order_id = booking.razorpay_order_id || orderId;
+    return booking.razorpay_order_id;
   }
 
-  // Mirrors public.finalize_payment() in supabase/migrations/002_launch_hardening.sql
+  public async findHolderBooking(showId: string, seatLayoutIds: string[], owners: string[]): Promise<Booking | null> {
+    const mine: Booking[] = [];
+    for (const b of Array.from(this.bookings.values()).reverse()) {
+      if (b.show_id !== showId || !b.hold_owner || !owners.includes(b.hold_owner)) continue;
+      const full = await this.getBookingById(b.id);
+      if (full) mine.push(full);
+    }
+    return matchHolderBooking(mine, seatLayoutIds);
+  }
+
+  public async findHolderTickets(owners: string[], limit: number): Promise<Booking[]> {
+    const list: Booking[] = [];
+    for (const b of Array.from(this.bookings.values()).reverse()) {
+      if (b.payment_status !== 'paid' || b.booking_channel !== 'online' || !b.hold_owner || !owners.includes(b.hold_owner)) continue;
+      const full = await this.getBookingById(b.id);
+      if (full) list.push(full);
+    }
+    return list.filter(ticketStillUsable).slice(0, limit);
+  }
+
+  // Mirrors public.finalize_payment() in supabase/migrations/006_payment_and_hold_fixes.sql
   public async finalizePayment(
     bookingId: string,
     paymentId: string,
@@ -594,6 +723,14 @@ export class MockDatabase implements DatabaseClient {
     if (!booking) return 'not_found';
     if (booking.payment_status === 'paid') return 'already_paid';
     if (booking.payment_status === 'refund_pending' || booking.payment_status === 'refunded') return 'refunding';
+
+    const cancelled = !!this.shows.get(booking.show_id)?.cancelled_at;
+    if (cancelled || booking.superseded_at) {
+      booking.payment_status = conflictStatus;
+      booking.razorpay_payment_id = paymentId;
+      if (conflictStatus === 'refund_pending') booking.refund_reason = cancelled ? 'show_cancelled' : 'customer_changed_seats';
+      return 'conflict';
+    }
 
     const ids = this.bookingSeats.filter(bs => bs.booking_id === bookingId).map(bs => bs.seat_layout_id);
     const seats = ids.map(id => this.seatStatuses.get(`${booking.show_id}:${id}`));
@@ -615,6 +752,7 @@ export class MockDatabase implements DatabaseClient {
       booking.razorpay_payment_id = paymentId;
       booking.qr_code_token = booking.qr_code_token || qrToken;
       booking.paid_at = new Date().toISOString();
+      if (booking.hold_owner) this.holdWindows.delete(`${booking.hold_owner}:${booking.show_id}`);
       return 'confirmed';
     }
 
@@ -653,6 +791,21 @@ export class MockDatabase implements DatabaseClient {
     }
   }
 
+  public async recordExternalRefund(bookingId: string, paymentId: string, refundId: string | null): Promise<'refunded' | 'ignored'> {
+    const booking = this.bookings.get(bookingId);
+    if (!booking || booking.payment_status !== 'paid' || booking.razorpay_payment_id !== paymentId) return 'ignored';
+    booking.payment_status = 'refunded';
+    booking.razorpay_refund_id = refundId;
+    booking.refund_reason = 'refunded_by_cinema';
+    for (const st of this.seatStatuses.values()) {
+      if (st.booking_id === bookingId) {
+        st.status = 'available';
+        st.booking_id = null;
+      }
+    }
+    return 'refunded';
+  }
+
   public async getPendingOnlineBookings(olderThanSeconds: number, limit: number): Promise<Booking[]> {
     const cutoff = Date.now() - olderThanSeconds * 1000;
     return Array.from(this.bookings.values())
@@ -672,9 +825,12 @@ export class MockDatabase implements DatabaseClient {
     this.processedWebhookEvents.add(eventId);
   }
 
-  public async claimTicketEmail(bookingId: string): Promise<boolean> {
+  public async claimTicketEmail(bookingId: string): Promise<number | null> {
     const booking = this.bookings.get(bookingId);
-    return !!booking && booking.payment_status === 'paid' && !booking.ticket_email_sent_at;
+    const attempt = (this.ticketEmailAttempts.get(bookingId) || 0) + 1;
+    if (!booking || booking.payment_status !== 'paid' || booking.ticket_email_sent_at || attempt > MAX_TICKET_EMAIL_ATTEMPTS) return null;
+    this.ticketEmailAttempts.set(bookingId, attempt);
+    return attempt;
   }
 
   public async markTicketEmailSent(bookingId: string): Promise<void> {
@@ -685,6 +841,23 @@ export class MockDatabase implements DatabaseClient {
   public async getUnsentTicketEmailBookings(limit: number): Promise<Booking[]> {
     return Array.from(this.bookings.values())
       .filter(b => b.payment_status === 'paid' && !b.ticket_email_sent_at)
+      .slice(0, limit);
+  }
+
+  public async claimRefundEmail(bookingId: string): Promise<boolean> {
+    const booking = this.bookings.get(bookingId);
+    if (!booking || booking.payment_status !== 'refunded' || this.refundEmailsSent.has(bookingId)) return false;
+    this.refundEmailsSent.add(bookingId);
+    return true;
+  }
+
+  public async releaseRefundEmail(bookingId: string): Promise<void> {
+    this.refundEmailsSent.delete(bookingId);
+  }
+
+  public async getUnsentRefundEmailBookings(limit: number): Promise<Booking[]> {
+    return Array.from(this.bookings.values())
+      .filter(b => b.payment_status === 'refunded' && !this.refundEmailsSent.has(b.id))
       .slice(0, limit);
   }
 
@@ -704,6 +877,18 @@ export class MockDatabase implements DatabaseClient {
       ticketsSold: this.bookingSeats.filter(bs => paidIds.has(bs.booking_id)).length,
       refundsPending: Array.from(this.bookings.values()).filter(b => b.payment_status === 'refund_pending').length,
     };
+  }
+
+  public async getBookingsForShowDate(showDate: string): Promise<Booking[]> {
+    const matches = Array.from(this.bookings.values())
+      .filter(b => ['paid', 'refund_pending', 'refunded'].includes(b.payment_status) && this.shows.get(b.show_id)?.show_date === showDate)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+    const list: Booking[] = [];
+    for (const b of matches) {
+      const full = await this.getBookingById(b.id);
+      if (full) list.push(full);
+    }
+    return list;
   }
 
   public async getBookingById(id: string): Promise<Booking | null> {
@@ -784,11 +969,25 @@ export class MockDatabase implements DatabaseClient {
     return list;
   }
 
-  public async checkInBooking(bookingId: string, staffId: string | null): Promise<boolean> {
+  public async checkInBooking(bookingId: string, staffId: string | null, count?: number): Promise<number> {
     const booking = this.bookings.get(bookingId);
-    if (!booking || booking.payment_status !== 'paid' || booking.checked_in_at) return false;
-    booking.checked_in_at = new Date().toISOString();
+    if (!booking || booking.payment_status !== 'paid' || booking.checked_in_at) return 0;
+    const total = this.bookingSeats.filter(bs => bs.booking_id === bookingId).length;
+    const done = booking.admitted_seats ?? 0;
+    const add = Math.min(count ?? total, total - done);
+    if (add <= 0) return 0;
+    booking.admitted_seats = done + add;
     booking.checked_in_by = staffId;
+    if (done + add >= total) booking.checked_in_at = new Date().toISOString();
+    return add;
+  }
+
+  public async undoCheckIn(bookingId: string): Promise<boolean> {
+    const booking = this.bookings.get(bookingId);
+    if (!booking?.checked_in_at && !booking?.admitted_seats) return false;
+    booking.checked_in_at = null;
+    booking.checked_in_by = null;
+    booking.admitted_seats = 0;
     return true;
   }
 
@@ -875,7 +1074,7 @@ export class MockDatabase implements DatabaseClient {
   }
 
   public async getAuditLogs(limit: number): Promise<AuditLog[]> {
-    return [...this.auditLogs].reverse().slice(0, limit);
+    return this.auditLogs.filter(log => log.action !== 'SEAT_LOCK').reverse().slice(0, limit);
   }
 }
 

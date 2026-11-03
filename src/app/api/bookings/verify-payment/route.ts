@@ -3,11 +3,12 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { rateLimit } from '@/lib/rateLimit';
 import { getClientIp } from '@/lib/requestAuth';
-import { getRazorpay, isRazorpayConfigured, settlePayment } from '@/lib/payments';
+import { getRazorpay, isRazorpayConfigured, reconcilePendingBooking, settlePayment } from '@/lib/payments';
 
 const verifySchema = z.object({
   bookingId: z.string().min(1).max(100),
-  paymentId: z.string().regex(/^pay_[A-Za-z0-9]+$/),
+  // Without an id (customer came back, or closed the window): check every payment on the order
+  paymentId: z.string().regex(/^pay_[A-Za-z0-9]+$/).optional(),
 });
 
 /**
@@ -38,6 +39,13 @@ export async function POST(req: NextRequest) {
 
     if (!isRazorpayConfigured()) {
       return NextResponse.json({ error: 'Online payments are not configured' }, { status: 503 });
+    }
+
+    if (!paymentId) {
+      const checked = await reconcilePendingBooking(booking);
+      if (checked === 'confirmed' || checked === 'already_paid') return NextResponse.json({ status: 'confirmed' });
+      if (checked === 'refund_queued') return NextResponse.json({ status: 'refunded' });
+      return NextResponse.json({ status: 'pending' });
     }
 
     const rz = getRazorpay();

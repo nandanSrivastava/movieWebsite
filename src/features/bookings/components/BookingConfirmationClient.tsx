@@ -11,12 +11,31 @@ import DigitalTicketStub from '@/features/bookings/components/DigitalTicketStub'
 import GoldTicketPassExport from '@/features/bookings/components/GoldTicketPassExport';
 import StepIndicator from '@/features/bookings/components/StepIndicator';
 import { formatShowDate, formatShowTime, seatLabel, showStartsAt } from '@/features/shared/utils/format';
+import { isCounterRefund, refundReasonText } from '@/features/shared/utils/refundReasons';
 import styles from './BookingConfirmationClient.module.css';
 
 interface BookingConfirmationClientProps {
   initialBooking: any;
   accessKey: string | null;
 }
+
+// While a payment is unconfirmed the page looks often at first, then settles down.
+// It never stops on its own: this is the screen a customer stares at after paying.
+const FAST_POLL_MS = 1_500;
+const SLOW_POLL_MS = 15_000;
+const FAST_POLL_FOR_MS = 30_000;
+// Our own question to Razorpay, in case its webhook is late or lost
+const FIRST_BANK_CHECK_MS = 5_000;
+const BANK_CHECK_EVERY_MS = 30_000;
+const MAX_BANK_CHECKS = 20;
+
+const REFUND_TITLES: Record<string, string> = {
+  show_cancelled: 'This show has been cancelled',
+  show_cancelled_cash: 'This show has been cancelled',
+  customer_changed_seats: 'This payment was refunded',
+  refunded_by_cinema: 'This booking was refunded',
+  amount_mismatch: 'This payment was refunded',
+};
 
 // Same coordinates as the map on the home page
 const CINEMA_LOCATION = '27.1401051,84.0555802';
@@ -70,65 +89,64 @@ export default function BookingConfirmationClient({ initialBooking, accessKey }:
     }
   };
 
-  const [pollingAttempts, setPollingAttempts] = useState(0);
-  const [hasNotified, setHasNotified] = useState(false);
-  const [verificationFailed, setVerificationFailed] = useState(false);
-  const [checkingBank, setCheckingBank] = useState(false);
+  const paymentId = searchParams.get('paymentId');
+  const [openedAt] = useState(() => Date.now());
+  const [bankHasBeenAsked, setBankHasBeenAsked] = useState(false);
 
   // ── 1. WEBHOOK COMPLETION POLLING WITH REACT QUERY ───────────
   const { data: booking, refetch } = useQuery({
     queryKey: ['bookingStatus', initialBooking.id],
     queryFn: async () => {
-      setPollingAttempts(p => p + 1);
       const keyParam = accessKey ? `&k=${encodeURIComponent(accessKey)}` : '';
       const res = await fetch(`/api/bookings/status?bookingId=${initialBooking.id}${keyParam}`);
       if (!res.ok) throw new Error('Status check failed');
       return await res.json();
     },
     refetchInterval: (query) => {
-      // In React Query v5, query is passed to refetchInterval.
-      const paymentId = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('paymentId') : null;
-      const maxAttempts = paymentId ? 3 : 20;
-
-      if (query.state?.data?.payment_status !== 'pending' || pollingAttempts >= maxAttempts) return false;
-      return 1500;
+      if (query.state?.data?.payment_status !== 'pending') return false;
+      return Date.now() - openedAt < FAST_POLL_FOR_MS ? FAST_POLL_MS : SLOW_POLL_MS;
     },
+    // A failed look isn't news: the customer still sees the last thing we knew
+    retry: true,
     initialData: initialBooking,
   });
 
   const status = booking?.payment_status || 'pending';
 
-  // The page itself says what happened; no extra pop-ups for the outcome
+  // The webhook normally settles this. If it's late or lost, ask Razorpay ourselves.
+  const isPending = status === 'pending';
   useEffect(() => {
-    if (status !== 'pending' && !hasNotified) {
-      setHasNotified(true);
-    }
-
-    const paymentId = searchParams.get('paymentId');
-    const maxAttempts = paymentId ? 3 : 20;
-
-    if (pollingAttempts >= maxAttempts && status === 'pending' && !hasNotified) {
-      setHasNotified(true);
-      if (paymentId) {
-        setCheckingBank(true);
-        fetch('/api/bookings/verify-payment', {
+    if (!isPending) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let checks = 0;
+    const askBank = async () => {
+      try {
+        const res = await fetch('/api/bookings/verify-payment', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bookingId: initialBooking.id, paymentId })
-        }).then(res => res.json()).then(data => {
-          if (data.status === 'confirmed' || data.status === 'refunded') {
-             refetch();
-          } else {
-             setVerificationFailed(true);
-          }
-        }).catch(() => {
-          setVerificationFailed(true);
-        }).finally(() => setCheckingBank(false));
-      } else {
-        setVerificationFailed(true);
+          body: JSON.stringify({ bookingId: initialBooking.id, ...(paymentId ? { paymentId } : {}) })
+        });
+        const data = res.ok ? await res.json() : null;
+        if (stopped) return;
+        if (data?.status === 'confirmed' || data?.status === 'refunded') {
+          refetch();
+          return;
+        }
+      } catch {
+        // Offline: try again at the next turn
       }
-    }
-  }, [status, pollingAttempts, hasNotified, searchParams, initialBooking.id, refetch]);
+      if (stopped) return;
+      setBankHasBeenAsked(true);
+      checks += 1;
+      if (checks < MAX_BANK_CHECKS) timer = setTimeout(askBank, BANK_CHECK_EVERY_MS);
+    };
+    timer = setTimeout(askBank, FIRST_BANK_CHECK_MS);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [isPending, paymentId, initialBooking.id, refetch]);
 
   // ── 2. QR CODE GENERATOR WITH REACT QUERY ────────────────────
   const { data: qrCodeData } = useQuery({
@@ -153,20 +171,29 @@ export default function BookingConfirmationClient({ initialBooking, accessKey }:
   // ── 3. RENDER STATES ─────────────────────────────────────────
 
   if (status === 'pending') {
-    if (verificationFailed) {
+    if (bankHasBeenAsked) {
+      // Razorpay handed us a payment id only if they finished paying there.
+      // Without one, they may simply have closed the window, so don't claim they paid.
+      const whereTheTicketGoes = booking?.customer_email
+        ? <>It will also be emailed to <strong>{booking.customer_email}</strong>.</>
+        : <>You can get it later from <Link href="/booking/lookup">Find my ticket</Link> on this phone, or show your number at the counter.</>;
       return (
-        <div className={styles.state}>
+        <div className={styles.state} role="status" aria-live="polite">
           <span className={`${styles.stateIcon} ${styles.urgent}`} aria-hidden><Clock /></span>
-          <h1 className={styles.stateTitle}>Still confirming your payment</h1>
+          <h1 className={styles.stateTitle}>{paymentId ? 'Still confirming your payment' : 'We haven’t seen a payment yet'}</h1>
           <p className={styles.stateBody}>
-            The bank hasn&apos;t confirmed this payment yet. If money was deducted, we&apos;ll confirm your ticket
-            (and email it to you) or refund you automatically within a few minutes. You can safely close this page.
+            {paymentId
+              ? 'Your bank hasn’t confirmed this payment yet. If money was deducted, you’ll get your ticket or an automatic refund within a few minutes. This page keeps checking and updates by itself.'
+              : 'If you paid, it can take a few minutes to reach us, and you’ll get your ticket or an automatic refund. This page keeps checking and updates by itself. If you didn’t finish paying, you haven’t been charged.'}
+            {' '}{whereTheTicketGoes}
           </p>
           <div className={styles.stateActions}>
-            <button onClick={() => window.location.reload()} className="btn btn-primary">
+            <button onClick={() => refetch()} className="btn btn-primary">
               <RefreshCw aria-hidden />Check again
             </button>
-            <Link href="/booking/lookup" className="btn btn-ghost">Find my ticket later</Link>
+            {paymentId
+              ? <Link href="/booking/lookup" className="btn btn-ghost">Find my ticket later</Link>
+              : <Link href={`/booking/${booking?.show_id}`} className="btn btn-ghost">Back to seats</Link>}
           </div>
         </div>
       );
@@ -175,31 +202,35 @@ export default function BookingConfirmationClient({ initialBooking, accessKey }:
     return (
       <div className={styles.state} role="status" aria-live="polite">
         <span className={`spinner ${styles.bigSpinner}`} aria-hidden />
-        <h1 className={styles.stateTitle}>{checkingBank ? 'Checking with your bank…' : 'Confirming your payment…'}</h1>
+        <h1 className={styles.stateTitle}>Confirming your payment…</h1>
         <p className={styles.stateBody}>This usually takes a few seconds. Please keep this page open.</p>
       </div>
     );
   }
 
-  // Seats lost before payment completed, or checkout abandoned
+  // Money went back, or the booking never completed
   if (status === 'failed' || status === 'refunded' || status === 'refund_pending') {
     const refunding = status !== 'failed';
+    const reason: string | null = booking?.refund_reason ?? null;
+    const atCounter = isCounterRefund(reason);
+    const moneyLine = atCounter ? ''
+      : status === 'refunded' ? ' Your full payment has been refunded; banks usually show it within 5–7 working days.'
+      : ' A full refund is being processed automatically.';
+    const showGone = reason === 'show_cancelled' || reason === 'show_cancelled_cash';
     return (
       <div className={styles.state} role="alert">
         <span className={`${styles.stateIcon} ${styles.danger}`} aria-hidden><AlertCircle /></span>
         <h1 className={styles.stateTitle}>
-          {refunding ? 'Seats no longer available' : 'Booking not completed'}
+          {!refunding ? 'Booking not completed' : (reason && REFUND_TITLES[reason]) || 'Seats no longer available'}
         </h1>
         <p className={styles.stateBody}>
           {refunding
-            ? (status === 'refunded'
-                ? 'The seat hold ran out and the seats went to another customer before your payment arrived. Your full payment has been refunded; banks usually show it within 5–7 working days.'
-                : 'The seat hold ran out and the seats went to another customer before your payment arrived. A full refund is being processed automatically.')
-            : 'The seat hold expired before payment, so no ticket was issued and nothing was charged for this booking.'}
+            ? `${refundReasonText(reason)}${moneyLine}`
+            : 'This booking wasn’t paid for in time, so no ticket was issued. If your bank shows a deduction, it returns the money automatically.'}
         </p>
         <div className={styles.stateActions}>
-          <Link href={`/booking/${booking?.show_id}`} replace className="btn btn-primary">Choose seats again</Link>
-          <Link href={movieHref} className="btn btn-ghost">Other showtimes</Link>
+          {!showGone && <Link href={`/booking/${booking?.show_id}`} replace className="btn btn-primary">Choose seats again</Link>}
+          <Link href={movieHref} className={`btn ${showGone ? 'btn-primary' : 'btn-ghost'}`}>Other showtimes</Link>
         </div>
       </div>
     );

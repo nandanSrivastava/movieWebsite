@@ -56,9 +56,9 @@ export default function AdminForms({
   const queryClient = useQueryClient();
 
   const {
-    movieTitle, movieSynopsis, movieGenre, movieLanguage, movieDuration, movieCertification, moviePoster, movieTrailer, movieIsFeatured, movieSubmitting,
+    movieTitle, movieSynopsis, movieGenre, movieLanguage, movieDuration, movieCertification, moviePoster, movieTrailer, movieIsFeatured, movieSubmitting, editingMovieId,
     setMovieField, resetMovieForm, setMovieSubmitting,
-    scheduleMovieId, scheduleScreenId, scheduleDate, scheduleTime, priceClassic, pricePremium, scheduleSubmitting,
+    scheduleMovieId, scheduleScreenId, scheduleDate, priceClassic, pricePremium, scheduleSubmitting,
     setScheduleField, resetScheduleForm, setScheduleSubmitting
   } = useAdminStore();
 
@@ -107,9 +107,10 @@ export default function AdminForms({
     setMovieSubmitting(true);
     try {
       const res = await fetch('/api/admin/movies', {
-        method: 'POST',
+        method: editingMovieId ? 'PATCH' : 'POST',
         headers: await getAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
+          ...(editingMovieId ? { id: editingMovieId } : {}),
           title: movieTitle,
           synopsis: movieSynopsis,
           genre: movieGenre,
@@ -122,14 +123,14 @@ export default function AdminForms({
         })
       });
       const resData = await res.json();
-      if (!res.ok) throw new Error(resData.error || 'Failed to list movie.');
+      if (!res.ok) throw new Error(resData.error || 'Failed to save movie.');
 
-      showToast(`Successfully listed movie "${movieTitle}"!`, 'success');
+      showToast(editingMovieId ? `Saved changes to "${movieTitle}".` : `Successfully listed movie "${movieTitle}"!`, 'success');
       resetMovieForm();
       queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
       if (onCloseForm) onCloseForm();
     } catch (err: any) {
-      showToast(err.message || 'Failed to list movie.', 'error');
+      showToast(err.message || 'Failed to save movie.', 'error');
     } finally {
       setMovieSubmitting(false);
     }
@@ -162,53 +163,44 @@ export default function AdminForms({
       return;
     }
 
+    // A blank or mistyped price must not quietly become a default the owner never chose
+    const classic = Number(priceClassic);
+    const premium = Number(pricePremium);
+    if (!Number.isInteger(classic) || classic < 1 || !Number.isInteger(premium) || premium < 1) {
+      showToast('Enter both ticket prices as whole rupees.', 'error');
+      return;
+    }
+
     setScheduleSubmitting(true);
 
     try {
-      const showsToCreate = [];
-      for (const d of datesToSchedule) {
-        for (const t of selectedTimes) {
-          showsToCreate.push({
-            movie_id: scheduleMovieId,
-            screen_id: scheduleScreenId,
-            show_date: d,
-            show_time: t,
-            price_classic: Number(priceClassic) || 150,
-            price_premium: Number(pricePremium) || 200
-          });
-        }
+      // One request, so the server can check every slot against the others too
+      const res = await fetch('/api/shows', {
+        method: 'POST',
+        headers: await getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          movie_id: scheduleMovieId,
+          screen_id: scheduleScreenId,
+          dates: datesToSchedule,
+          times: selectedTimes,
+          price_classic: classic,
+          price_premium: premium,
+        }),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error || 'Failed to schedule showtime.');
+
+      const skipped: { date: string; time: string; error: string }[] = resData.skipped ?? [];
+      if (skipped.length > 0) {
+        showToast(`Scheduled ${resData.count} showtime(s). ${skipped.length} skipped: ${skipped[0].date} ${skipped[0].time}: ${skipped[0].error}.`, 'info');
+      } else {
+        showToast(`Successfully scheduled ${resData.count} showtime(s)!`, 'success');
       }
-
-      const results = await Promise.allSettled(
-        showsToCreate.map((showPayload) =>
-          fetch('/api/shows', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(showPayload)
-          }).then(async (res) => {
-            const resData = await res.json();
-            if (!res.ok) throw new Error(resData.error || `Failed to schedule for ${showPayload.show_date}`);
-            return resData;
-          })
-        )
-      );
-
-      const succeeded = results.filter(r => r.status === 'fulfilled').length;
-      const failed = results.filter(r => r.status === 'rejected');
-
-      if (succeeded > 0) {
-        showToast(`Successfully scheduled ${succeeded} showtime(s)!`, 'success');
-        resetScheduleForm();
-        setStartDate('');
-        setEndDate('');
-        queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
-        if (onCloseForm) onCloseForm();
-      }
-
-      if (failed.length > 0) {
-        const firstErr = (failed[0] as PromiseRejectedResult).reason;
-        showToast(`Warning: ${failed.length} showtime(s) failed: ${firstErr?.message || 'Conflict detected'}`, 'error');
-      }
+      resetScheduleForm();
+      setStartDate('');
+      setEndDate('');
+      queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
+      if (onCloseForm) onCloseForm();
     } catch (err: any) {
       showToast(err.message || 'Failed to schedule showtime.', 'error');
     } finally {
@@ -222,8 +214,8 @@ export default function AdminForms({
       showToast('Please fill in Full Name, Email, and Password.', 'error');
       return;
     }
-    if (memberPassword.length < 6) {
-      showToast('Password must be at least 6 characters.', 'error');
+    if (memberPassword.length < 10) {
+      showToast('Staff passwords must be at least 10 characters long.', 'error');
       return;
     }
     setMemberSubmitting(true);
@@ -271,7 +263,7 @@ export default function AdminForms({
         <div className="card" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--highlight-gold)', padding: '28px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '22px' }}>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, fontFamily: 'var(--font-family-heading)', color: 'var(--highlight-gold)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              🎬 Add New Movie to Catalog
+              🎬 {editingMovieId ? `Edit ${movieTitle || 'Movie'}` : 'Add New Movie to Catalog'}
             </h3>
             <button
               type="button"
@@ -486,7 +478,7 @@ export default function AdminForms({
                 transition: 'all 0.2s'
               }}
             >
-              {movieSubmitting ? 'Listing Movie...' : 'List Movie'}
+              {movieSubmitting ? 'Saving...' : editingMovieId ? 'Save Changes' : 'List Movie'}
             </button>
           </form>
         </div>
@@ -535,7 +527,7 @@ export default function AdminForms({
                   }}
                 >
                   <option value="">-- Choose Movie --</option>
-                  {moviesList.map((movie: any) => (
+                  {moviesList.filter((movie: any) => movie.is_active !== false).map((movie: any) => (
                     <option key={movie.id} value={movie.id}>{movie.title}</option>
                   ))}
                 </select>
@@ -945,7 +937,7 @@ export default function AdminForms({
                 <input
                   type="password"
                   required
-                  minLength={6}
+                  minLength={10}
                   placeholder="••••••••"
                   value={memberPassword}
                   onChange={(e) => setMemberPassword(e.target.value)}

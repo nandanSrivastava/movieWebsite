@@ -2,10 +2,11 @@ import 'server-only';
 import nodemailer, { Transporter } from 'nodemailer';
 import { after } from 'next/server';
 import { db } from '@/lib/db';
-import { ticketConfirmationEmail, ticketLookupEmail } from '@/lib/email/templates';
+import { refundEmail, ticketConfirmationEmail, ticketConfirmationText, ticketLookupEmail } from '@/lib/email/templates';
 import { createClient } from '@supabase/supabase-js';
 import { ticketUrl } from '@/lib/siteUrl';
-import type { Booking } from '@/lib/types';
+import { MAX_TICKET_EMAIL_ATTEMPTS, type Booking } from '@/lib/types';
+import { formatShowDate, formatShowTime } from '@/features/shared/utils/format';
 
 // Strip whitespace from SMTP_PASS (e.g. Gmail App Passwords formatted as "xxxx xxxx xxxx xxxx")
 const getSmtpPass = () => process.env.SMTP_PASS?.replace(/\s+/g, '') || '';
@@ -71,8 +72,14 @@ const formatSeats = (booking: Booking) =>
     ?.map((bs: any) => `${bs.seat_layout?.row_label || ''}-${bs.seat_layout?.seat_number || ''}`)
     .join(', ') || 'N/A';
 
+// Printed the way the site says them, not the way the database stores them
+const showDateLabel = (booking: Booking) => (booking.show?.show_date ? formatShowDate(booking.show.show_date, { withYear: true }) : '—');
+const showTimeLabel = (booking: Booking) => (booking.show?.show_time ? formatShowTime(booking.show.show_time) : '—');
+
 async function resolveCustomerEmail(booking: Booking): Promise<string | null> {
   if (booking.customer_email && EMAIL_RE.test(booking.customer_email)) return booking.customer_email;
+  // At the counter, the signed-in account is the cashier's, not the customer's
+  if (booking.booking_channel === 'counter') return null;
   if (!booking.booked_by || !process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) return null;
   try {
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -92,7 +99,8 @@ async function resolveCustomerEmail(booking: Booking): Promise<string | null> {
 export async function deliverTicketEmail(bookingId: string): Promise<'sent' | 'skipped' | 'failed' | 'not_due'> {
   try {
     if (!isEmailConfigured()) return 'skipped';
-    if (!(await db.claimTicketEmail(bookingId))) return 'not_due';
+    const attempt = await db.claimTicketEmail(bookingId);
+    if (attempt === null) return 'not_due';
 
     const booking = await db.getBookingById(bookingId);
     if (!booking) return 'failed';
@@ -123,29 +131,37 @@ export async function deliverTicketEmail(bookingId: string): Promise<'sent' | 's
     }
 
     const movieTitle = booking.show?.movie?.title || 'Movie';
+    const ticket = {
+      customerName: booking.customer_name,
+      bookingId: booking.id,
+      movieTitle,
+      screenName: booking.show?.screen?.name || 'Standard Screen',
+      showDate: showDateLabel(booking),
+      showTime: showTimeLabel(booking),
+      seats: formatSeats(booking),
+      totalAmount: Number(booking.total_amount),
+      qrCodeDataUrl,
+      qrToken,
+      paymentMode: booking.booking_channel === 'counter' ? 'cash' as const : 'online' as const,
+      ticketUrl: ticketUrl(booking.id, booking.access_key),
+    };
     const result = await sendEmail({
       to: customerEmail,
       subject: booking.booking_channel === 'counter'
         ? `Dhrub Cineplex — Cash Sale Ticket (${movieTitle})`
         : `Dhrub Cineplex — Ticket Confirmed (${movieTitle})`,
-      html: ticketConfirmationEmail({
-        customerName: booking.customer_name,
-        bookingId: booking.id,
-        movieTitle,
-        screenName: booking.show?.screen?.name || 'Standard Screen',
-        showDate: booking.show?.show_date || '—',
-        showTime: booking.show?.show_time || '—',
-        seats: formatSeats(booking),
-        totalAmount: Number(booking.total_amount),
-        qrCodeDataUrl,
-        qrToken,
-        paymentMode: booking.booking_channel === 'counter' ? 'cash' : 'online',
-        ticketUrl: ticketUrl(booking.id, booking.access_key),
-      }),
+      html: ticketConfirmationEmail(ticket),
+      text: ticketConfirmationText(ticket),
       attachments,
     });
 
-    if (!result.success) return 'failed';
+    if (!result.success) {
+      if (attempt >= MAX_TICKET_EMAIL_ATTEMPTS) {
+        // Out of retries: leave a trace the owner can see in the audit log
+        await db.logAudit(booking.booked_by, 'TICKET_EMAIL_GAVE_UP', { bookingId, attempts: attempt });
+      }
+      return 'failed';
+    }
     await db.markTicketEmailSent(bookingId);
     return 'sent';
   } catch (err) {
@@ -157,6 +173,87 @@ export async function deliverTicketEmail(bookingId: string): Promise<'sent' | 's
 /** Sends the ticket email after the response has gone out (never blocks the caller). */
 export function queueTicketEmail(bookingId: string) {
   after(() => deliverTicketEmail(bookingId).then(() => undefined));
+}
+
+/**
+ * Tells the customer their money went back. The booking row is the outbox:
+ * claiming stamps it, a failed send clears the stamp, and the reconcile job
+ * retries. Without this a customer whose tab was closed only ever finds out
+ * from their bank.
+ */
+export async function deliverRefundEmail(bookingId: string): Promise<'sent' | 'skipped' | 'failed' | 'not_due'> {
+  try {
+    if (!isEmailConfigured()) return 'skipped';
+    if (!(await db.claimRefundEmail(bookingId))) return 'not_due';
+
+    const booking = await db.getBookingById(bookingId);
+    if (!booking) return 'failed';
+
+    const customerEmail = await resolveCustomerEmail(booking);
+    if (!customerEmail) return 'skipped';
+
+    const result = await sendEmail({
+      to: customerEmail,
+      subject: `Dhrub Cineplex — Refund for ${booking.show?.movie?.title || 'your booking'}`,
+      html: refundEmail({
+        customerName: booking.customer_name,
+        movieTitle: booking.show?.movie?.title || 'Movie',
+        showDate: showDateLabel(booking),
+        showTime: showTimeLabel(booking),
+        seats: formatSeats(booking),
+        amount: Number(booking.total_amount),
+        reason: booking.refund_reason ?? null,
+      }),
+    });
+    if (!result.success) {
+      await db.releaseRefundEmail(bookingId);
+      return 'failed';
+    }
+    return 'sent';
+  } catch (err) {
+    console.error('deliverRefundEmail error:', err);
+    return 'failed';
+  }
+}
+
+/** Sends the refund notice after the response. The outbox covers any failure here. */
+export function queueRefundEmail(bookingId: string) {
+  try {
+    after(() => deliverRefundEmail(bookingId).then(() => undefined));
+  } catch {
+    // Outside a request scope the reconcile job sends it instead
+  }
+}
+
+/** One-off notice for money returned on a booking that keeps its ticket. */
+export function sendExtraPaymentRefundEmail(booking: Booking, amount: number) {
+  const send = async () => {
+    try {
+      const customerEmail = await resolveCustomerEmail(booking);
+      if (!customerEmail) return;
+      await sendEmail({
+        to: customerEmail,
+        subject: 'Dhrub Cineplex — Extra payment refunded',
+        html: refundEmail({
+          customerName: booking.customer_name,
+          movieTitle: booking.show?.movie?.title || 'Movie',
+          showDate: showDateLabel(booking),
+          showTime: showTimeLabel(booking),
+          seats: formatSeats(booking),
+          amount,
+          reason: booking.payment_status === 'paid' ? 'duplicate_payment' : 'extra_payment',
+        }),
+      });
+    } catch (err) {
+      console.error('Extra payment refund email failed:', err);
+    }
+  };
+  try {
+    after(send);
+  } catch {
+    // Outside a request scope (a script or test). The refund itself has already gone through.
+    void send();
+  }
 }
 
 /** "Find my tickets": email every paid ticket for a phone number to the address on file. */
@@ -176,8 +273,8 @@ export async function sendTicketLookupEmails(bookings: Booking[]): Promise<numbe
       html: ticketLookupEmail({
         tickets: list.map(b => ({
           movieTitle: b.show?.movie?.title || 'Movie',
-          showDate: b.show?.show_date || '—',
-          showTime: b.show?.show_time || '—',
+          showDate: showDateLabel(b),
+          showTime: showTimeLabel(b),
           seats: formatSeats(b),
           ticketUrl: ticketUrl(b.id, b.access_key),
         })),

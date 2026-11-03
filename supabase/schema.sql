@@ -38,9 +38,17 @@ DROP FUNCTION IF EXISTS public.show_occupancy(UUID[]) CASCADE;
 DROP FUNCTION IF EXISTS public.admin_sales_summary() CASCADE;
 DROP FUNCTION IF EXISTS public.confirm_booking(UUID, UUID, UUID[], UUID) CASCADE;
 DROP FUNCTION IF EXISTS public.sweep_expired_locks() CASCADE;
+DROP FUNCTION IF EXISTS public.hold_limit_at(UUID, UUID) CASCADE;
+DROP FUNCTION IF EXISTS public.release_seat_holds(UUID, UUID[], UUID) CASCADE;
+DROP FUNCTION IF EXISTS public.adopt_guest_holds(UUID, UUID) CASCADE;
+DROP FUNCTION IF EXISTS public.record_external_refund(UUID, TEXT, TEXT) CASCADE;
+DROP FUNCTION IF EXISTS public.cancel_show(UUID) CASCADE;
+DROP FUNCTION IF EXISTS public.admit_seats(UUID, UUID, INTEGER) CASCADE;
+DROP FUNCTION IF EXISTS public.undo_admission(UUID) CASCADE;
 DROP FUNCTION IF EXISTS public.is_staff()  CASCADE;
 DROP FUNCTION IF EXISTS public.is_admin()  CASCADE;
 
+DROP TABLE IF EXISTS public.hold_windows CASCADE;
 DROP TABLE IF EXISTS public.rate_limits CASCADE;
 
 DROP TABLE IF EXISTS public.processed_webhook_events CASCADE;

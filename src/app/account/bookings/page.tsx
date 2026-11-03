@@ -18,7 +18,7 @@ export const metadata = {
 // Plain-language status for each payment state
 const STATUS: Record<string, { label: string; tone: 'ok' | 'wait' | 'off' }> = {
   paid: { label: 'Confirmed', tone: 'ok' },
-  pending: { label: 'Confirming payment', tone: 'wait' },
+  pending: { label: 'Payment not confirmed', tone: 'wait' },
   refund_pending: { label: 'Refund on its way', tone: 'wait' },
   refunded: { label: 'Refunded', tone: 'off' },
   failed: { label: 'Not completed', tone: 'off' },
@@ -32,7 +32,9 @@ export default async function MyBookingsPage() {
     redirect('/login?redirect=/account/bookings');
   }
 
-  const bookings = await db.getBookingsByUser(userId);
+  // A checkout they never paid for, or gave up on, was never a ticket
+  const bookings = (await db.getBookingsByUser(userId)).filter(b =>
+    b.payment_status !== 'failed' && !(b.payment_status === 'pending' && b.superseded_at));
 
   // Upcoming: shows that haven't started yet. Everything else is history.
   const now = Date.now();

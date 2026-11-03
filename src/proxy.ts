@@ -1,5 +1,40 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { isSessionCookieName } from '@/lib/sessionCookie';
+
+const isSupabaseConfigured = () =>
+  !!process.env.NEXT_PUBLIC_SUPABASE_URL &&
+  (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
+
+const hasSessionCookie = (req: NextRequest) => req.cookies.getAll().some(c => isSessionCookieName(c.name));
+
+/**
+ * A client whose session changes reach both the route handler (through the
+ * forwarded request) and the browser (through the response). Without this, a
+ * refresh made while rendering a page would use up the refresh token and throw
+ * the new one away, signing the customer out moments later.
+ */
+async function sessionClient(req: NextRequest) {
+  const { createServerClient } = await import('@supabase/ssr');
+  let response = NextResponse.next({ request: req });
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return req.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value));
+          response = NextResponse.next({ request: req });
+          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+        },
+      },
+    }
+  );
+  return { supabase, response: () => response };
+}
 
 export async function proxy(req: NextRequest) {
   const path = req.nextUrl.pathname;
@@ -23,7 +58,7 @@ export async function proxy(req: NextRequest) {
           originUrl.host === hostHeader ||
           isLocalDevOrigin ||
           originUrl.protocol === 'capacitor:';
-          
+
         if (!isAllowed) {
           return new NextResponse(
             JSON.stringify({ error: 'Access Denied: CORS policy violation.' }),
@@ -41,11 +76,7 @@ export async function proxy(req: NextRequest) {
 
   // 2. Role-based Auth Route Guards (for /admin and /counter paths)
   if (path.startsWith('/admin') || path.startsWith('/counter')) {
-    const isSupabaseConfigured = 
-      !!process.env.NEXT_PUBLIC_SUPABASE_URL && 
-      (!!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !!process.env.SUPABASE_SERVICE_ROLE_KEY);
-
-    if (!isSupabaseConfigured) {
+    if (!isSupabaseConfigured()) {
       // A production build never trusts the browser-written mock cookie
       if (process.env.NODE_ENV === 'production') {
         return NextResponse.redirect(new URL('/login?error=unavailable', req.url));
@@ -53,7 +84,7 @@ export async function proxy(req: NextRequest) {
 
       // ── MOCK MODE SECURITY GUARD (local development only) ─────
       const mockSession = req.cookies.get('cinebook_mock_session');
-      
+
       if (!mockSession) {
         return NextResponse.redirect(new URL('/login', req.url));
       }
@@ -65,7 +96,7 @@ export async function proxy(req: NextRequest) {
         if (path.startsWith('/admin') && role !== 'admin') {
           return NextResponse.redirect(new URL('/login?error=unauthorized', req.url));
         }
-        
+
         if (path.startsWith('/counter') && !['admin', 'member'].includes(role)) {
           return NextResponse.redirect(new URL('/login?error=unauthorized', req.url));
         }
@@ -74,25 +105,7 @@ export async function proxy(req: NextRequest) {
       }
     } else {
       // ── LIVE MODE SECURITY GUARD ──────────────────────────────
-      const res = NextResponse.next();
-      const { createServerClient } = await import('@supabase/ssr');
-      const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll() {
-              return req.cookies.getAll();
-            },
-            setAll(cookiesToSet) {
-              cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value));
-              cookiesToSet.forEach(({ name, value, options }) =>
-                res.cookies.set(name, value, options)
-              );
-            },
-          },
-        }
-      );
+      const { supabase, response } = await sessionClient(req);
 
       const { data: { user } } = await supabase.auth.getUser();
 
@@ -106,13 +119,23 @@ export async function proxy(req: NextRequest) {
       if (path.startsWith('/admin') && role !== 'admin') {
         return NextResponse.redirect(new URL('/login?error=unauthorized', req.url));
       }
-      
+
       if (path.startsWith('/counter') && !['admin', 'member'].includes(role)) {
         return NextResponse.redirect(new URL('/login?error=unauthorized', req.url));
       }
 
-      return res;
+      return response();
     }
+    return NextResponse.next();
+  }
+
+  // 3. Everything else this runs on: keep a signed-in session fresh. getSession
+  // only reads the cookie unless the token is about to expire, so this costs no
+  // network call on most requests, and nothing at all for guests.
+  if (isSupabaseConfigured() && hasSessionCookie(req)) {
+    const { supabase, response } = await sessionClient(req);
+    await supabase.auth.getSession();
+    return response();
   }
 
   return NextResponse.next();
@@ -122,6 +145,10 @@ export const config = {
   matcher: [
     '/admin/:path*',
     '/counter/:path*',
+    // Pages that read the signed-in user on the server
+    '/account/:path*',
+    '/booking/checkout',
+    '/booking/confirmation/:path*',
     // Every API route except two read-only, high-volume GETs that need no
     // origin or role check: /api/seats/status (CDN-cached and polled by every
     // open seat map) and /api/health (uptime probes). Skipping them saves a

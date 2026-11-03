@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useToast } from '@/features/shared/context/ToastContext';
 import { useQueryClient } from '@tanstack/react-query';
+import { useAdminStore } from '@/features/admin/store/adminStore';
+import { hasShowStarted } from '@/features/shared/utils/format';
 import { isMockMode } from '@/lib/config';
 import { supabase } from '@/lib/supabaseClient';
 
@@ -83,6 +85,15 @@ const formatEventBadge = (action: string) => {
       return { label: '🔄 System Sync', bg: 'rgba(156, 163, 175, 0.15)', color: '#9CA3AF' };
     case 'MEMBER_ONBOARDED':
       return { label: '👤 Staff Onboarded', bg: 'rgba(16, 185, 129, 0.15)', color: '#10B981' };
+    case 'MEMBER_REMOVED':
+      return { label: '👤 Staff Removed', bg: 'rgba(239, 68, 68, 0.15)', color: '#EF4444' };
+    case 'PAYMENT_CONFIRMED':
+      return { label: '✅ Ticket Paid', bg: 'rgba(16, 185, 129, 0.15)', color: '#10B981' };
+    case 'PAYMENT_REFUND_FAILED':
+    case 'PAYMENT_UNKNOWN_ORDER':
+    case 'PAYMENT_AMOUNT_MISMATCH':
+    case 'TICKET_EMAIL_GAVE_UP':
+      return { label: `⚠️ ${action.replace(/_/g, ' ')}`, bg: 'rgba(239, 68, 68, 0.15)', color: '#EF4444' };
     default:
       return { label: action.replace(/_/g, ' '), bg: 'rgba(255, 255, 255, 0.08)', color: '#FFFFFF' };
   }
@@ -128,6 +139,7 @@ export default function AdminTables({
   activeTab = 'overview',
   isFormOpen = false,
   onToggleForm,
+  onOpenForm,
   actioning, 
   handleForceReleaseHold 
 }: { 
@@ -139,6 +151,7 @@ export default function AdminTables({
   activeTab?: string,
   isFormOpen?: boolean,
   onToggleForm?: () => void,
+  onOpenForm?: () => void,
   actioning: string | null, 
   handleForceReleaseHold: (showId: string, seatLayoutId: string, seatLabel: string) => void 
 }) {
@@ -146,11 +159,62 @@ export default function AdminTables({
   const queryClient = useQueryClient();
   const [showRawLogs, setShowRawLogs] = useState(false);
   const [cancellingShowId, setCancellingShowId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const startEditingMovie = useAdminStore(state => state.startEditingMovie);
+
+  const handleEditMovie = (movie: any) => {
+    startEditingMovie(movie);
+    onOpenForm?.();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleToggleMovie = async (movie: any) => {
+    const hiding = movie.is_active !== false;
+    if (hiding && !window.confirm(`Hide "${movie.title}"?\n\nCustomers won't be able to find or book it. Tickets already sold stay valid.`)) return;
+
+    setBusyId(movie.id);
+    try {
+      const res = await fetch('/api/admin/movies', {
+        method: 'PATCH',
+        headers: await getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ id: movie.id, is_active: !hiding }),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error || 'Could not update this movie.');
+      showToast(hiding ? `"${movie.title}" is hidden from the site.` : `"${movie.title}" is back on the site.`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
+    } catch (err: any) {
+      showToast(err.message || 'Could not update this movie.', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleRemoveMember = async (member: any) => {
+    const name = member.full_name || member.email || 'this person';
+    if (!window.confirm(`Remove ${name} from counter staff?\n\nThey lose access to the box office right away. Their account stays, as an ordinary customer's.`)) return;
+
+    setBusyId(member.id);
+    try {
+      const res = await fetch(`/api/admin/members?id=${encodeURIComponent(member.id)}`, {
+        method: 'DELETE',
+        headers: await getAuthHeaders(),
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error || 'Could not remove this member.');
+      showToast(`${name} no longer has staff access.`, 'success');
+      queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
+    } catch (err: any) {
+      showToast(err.message || 'Could not remove this member.', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const handleCancelShow = async (showId: string, movieTitle: string, showDate: string, showTime: string) => {
     const timeFormatted = formatTimeLabel(showTime);
     const dateText = showDate ? `on ${showDate} ` : '';
-    const confirmMsg = `Are you sure you want to cancel the ${timeFormatted} show of "${movieTitle || 'this movie'}" ${dateText}?\n\nThis will remove the showtime from the schedule.`;
+    const confirmMsg = `Are you sure you want to cancel the ${timeFormatted} show of "${movieTitle || 'this movie'}" ${dateText}?\n\nIt comes off sale straight away. Anyone who paid online is refunded automatically and told by email. Cash tickets are marked for repayment at the counter.`;
     
     if (!window.confirm(confirmMsg)) return;
 
@@ -163,10 +227,14 @@ export default function AdminTables({
       const resData = await res.json();
       if (!res.ok) throw new Error(resData.error || 'Failed to cancel showtime.');
 
-      showToast(`Successfully cancelled showtime for "${movieTitle}"!`, 'success');
+      const followUps = [
+        resData.onlineRefunds > 0 ? `${resData.onlineRefunds} online refund(s) started` : null,
+        resData.cashRefunds > 0 ? `${resData.cashRefunds} cash ticket(s) to repay at the counter` : null,
+      ].filter(Boolean);
+      showToast(`Cancelled the show for "${movieTitle}".${followUps.length ? ` ${followUps.join(', ')}.` : ''}`, 'success');
       queryClient.invalidateQueries({ queryKey: ['adminDashboard'] });
     } catch (err: any) {
-      showToast(err.message || 'Cannot cancel showtime (it may have active customer bookings).', 'error');
+      showToast(err.message || 'Could not cancel this showtime. Please try again.', 'error');
     } finally {
       setCancellingShowId(null);
     }
@@ -329,7 +397,7 @@ export default function AdminTables({
                         {show.show_date ? `${show.show_date} • ` : ''}{show.screen?.name || 'Dhrub Talkies'} • {formatTimeLabel(show.show_time)}
                       </span>
                     </div>
-                    <button
+                    {!hasShowStarted(show.show_date, show.show_time) && <button
                       type="button"
                       onClick={() => handleCancelShow(show.id, show.movie?.title, show.show_date, show.show_time)}
                       disabled={cancellingShowId === show.id}
@@ -346,7 +414,7 @@ export default function AdminTables({
                       }}
                     >
                       {cancellingShowId === show.id ? 'Cancelling...' : '🗑️ Cancel'}
-                    </button>
+                    </button>}
                   </div>
 
                   <div style={{ marginTop: '16px' }}>
@@ -446,6 +514,26 @@ export default function AdminTables({
                       <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'block' }}>
                         {movie.genre || 'Action'} • {movie.language || 'Hindi'} • {movie.duration_minutes}m • [{movie.certification || 'UA'}]
                       </span>
+                      {movie.is_active === false && (
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#F59E0B', display: 'block', marginTop: '4px' }}>Hidden from the site</span>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleEditMovie(movie)}
+                        style={{ flex: 1, padding: '6px 10px', fontSize: '0.78rem', fontWeight: 600, borderRadius: '6px', border: '1px solid rgba(255,255,255,0.15)', backgroundColor: 'transparent', color: '#FFFFFF', cursor: 'pointer' }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleMovie(movie)}
+                        disabled={busyId === movie.id}
+                        style={{ flex: 1, padding: '6px 10px', fontSize: '0.78rem', fontWeight: 600, borderRadius: '6px', border: '1px solid rgba(245,158,11,0.4)', backgroundColor: 'transparent', color: '#F59E0B', cursor: 'pointer' }}
+                      >
+                        {busyId === movie.id ? 'Saving...' : movie.is_active === false ? 'Show' : 'Hide'}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -499,6 +587,7 @@ export default function AdminTables({
                     <th style={{ padding: '12px' }}>Phone</th>
                     <th style={{ padding: '12px' }}>Role</th>
                     <th style={{ padding: '12px' }}>Onboarded Date</th>
+                    <th style={{ padding: '12px', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -522,6 +611,16 @@ export default function AdminTables({
                       </td>
                       <td style={{ padding: '12px', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
                         {new Date(member.created_at || Date.now()).toLocaleDateString([], { year: 'numeric', month: 'short', day: 'numeric' })}
+                      </td>
+                      <td style={{ padding: '12px', textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMember(member)}
+                          disabled={busyId === member.id}
+                          style={{ padding: '6px 12px', fontSize: '0.75rem', fontWeight: 600, borderRadius: '6px', border: '1px solid rgba(239,68,68,0.3)', backgroundColor: 'rgba(239,68,68,0.12)', color: '#EF4444', cursor: 'pointer' }}
+                        >
+                          {busyId === member.id ? 'Removing...' : 'Remove'}
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -576,12 +675,12 @@ export default function AdminTables({
                 {auditLogs.slice(0, 200).map((log: any, index: number) => {
                   const badge = formatEventBadge(log.action);
                   const detailsText = formatDetails(log.details);
-                  const sourceLabel = log.ip === '127.0.0.1' || log.ip === 'Localhost' || !log.ip ? 'Website / Counter' : log.ip;
+                  const sourceLabel = log.ip_address === '127.0.0.1' || !log.ip_address ? 'Website / Counter' : log.ip_address;
 
                   return (
                     <tr key={index} style={{ borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
                       <td style={{ padding: '12px', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>
-                        {new Date(log.created_at || log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        {new Date(log.created_at || log.timestamp).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Kolkata' })}
                       </td>
                       <td style={{ padding: '12px' }}>
                         <span style={{

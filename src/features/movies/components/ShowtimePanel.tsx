@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarX2 } from 'lucide-react';
 import { Show as ShowType } from '@/lib/db';
+import { useServerOffset } from '@/features/shared/hooks/useServerClock';
 import { categoryPrice, formatINR, formatShowDay, formatShowTime, hasShowStarted, showDateParts } from '@/features/shared/utils/format';
 import styles from './ShowtimePanel.module.css';
 
@@ -16,17 +17,17 @@ interface ShowtimePanelProps {
 
 type Occupancy = Record<string, { booked: number; total: number }>;
 
-// From the public show list (CDN-cached ~10s): how full each show is
-function useOccupancy(enabled: boolean) {
+// How full this film's shows are (CDN-cached ~10s, so the same list costs one read)
+function useOccupancy(showIds: string[]) {
+  const ids = [...showIds].sort().join(',');
   return useQuery({
-    queryKey: ['showOccupancy'],
+    queryKey: ['showOccupancy', ids],
     queryFn: async (): Promise<Occupancy> => {
-      const res = await fetch('/api/shows');
-      if (!res.ok) throw new Error('Could not load shows');
-      const { shows } = await res.json();
-      return Object.fromEntries((shows as any[]).map(s => [s.id, { booked: s.bookedSeats ?? 0, total: s.totalSeats ?? 0 }]));
+      const res = await fetch(`/api/shows/occupancy?ids=${ids}`);
+      if (!res.ok) throw new Error('Could not load availability');
+      return (await res.json()).occupancy;
     },
-    enabled,
+    enabled: ids.length > 0,
     staleTime: 15_000,
     refetchInterval: 30_000,
     retry: 1,
@@ -42,13 +43,16 @@ function availability(o?: { booked: number; total: number }) {
 }
 
 export default function ShowtimePanel({ shows, renderedAt }: ShowtimePanelProps) {
-  // Started shows drop off; "now" ticks after mount so the page can stay open
+  // Started shows drop off; "now" ticks after mount so the page can stay open.
+  // It's the server's time: a phone with a wrong clock would otherwise lose shows.
+  const serverOffset = useServerOffset();
   const [now, setNow] = useState(renderedAt);
   useEffect(() => {
-    setNow(Date.now());
-    const id = setInterval(() => setNow(Date.now()), 60_000);
+    if (serverOffset === null) return;
+    setNow(Date.now() + serverOffset);
+    const id = setInterval(() => setNow(Date.now() + serverOffset), 60_000);
     return () => clearInterval(id);
-  }, []);
+  }, [serverOffset]);
 
   const upcomingShows = shows.filter((s) => !hasShowStarted(s.show_date, s.show_time, now));
   const uniqueDates = Array.from(new Set(upcomingShows.map((s) => s.show_date))).sort();
@@ -62,7 +66,7 @@ export default function ShowtimePanel({ shows, renderedAt }: ShowtimePanelProps)
     }
   }, [uniqueDates, selectedDate]);
 
-  const { data: occupancy } = useOccupancy(upcomingShows.length > 0);
+  const { data: occupancy } = useOccupancy(upcomingShows.map(s => s.id));
 
   if (upcomingShows.length === 0) {
     return (
@@ -93,7 +97,7 @@ export default function ShowtimePanel({ shows, renderedAt }: ShowtimePanelProps)
         {uniqueDates.map((date) => {
           const isSelected = date === selectedDate;
           const parts = showDateParts(date);
-          const relative = formatShowDay(date);
+          const relative = formatShowDay(date, now);
           const isRelative = relative === 'Today' || relative === 'Tomorrow';
           return (
             <button
@@ -114,7 +118,7 @@ export default function ShowtimePanel({ shows, renderedAt }: ShowtimePanelProps)
       {groups.map(group => (
         <div key={group.name ?? 'all'} className={styles.group}>
           {group.name && <h3 className={styles.screen}>{group.name}</h3>}
-          <ul className={styles.times} aria-label={`Showtimes for ${formatShowDay(selectedDate)}`}>
+          <ul className={styles.times} aria-label={`Showtimes for ${formatShowDay(selectedDate, now)}`}>
             {group.shows.map((show) => {
               const state = availability(occupancy?.[show.id]);
               const time = formatShowTime(show.show_time);

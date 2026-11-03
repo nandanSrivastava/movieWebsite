@@ -2,6 +2,11 @@ import React from 'react';
 import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
 
+export const metadata = {
+  title: 'Refund policy',
+  description: 'When and how Dhrub Cineplex refunds a ticket.',
+};
+
 export default function RefundPage() {
   return (
     <>

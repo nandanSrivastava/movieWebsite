@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import Script from 'next/script';
 import { AlertCircle, Clock } from 'lucide-react';
 import { useToast } from '@/features/shared/context/ToastContext';
 import BookingSummaryCard from '@/features/bookings/components/BookingSummaryCard';
@@ -11,8 +10,8 @@ import CheckoutForm, { FieldErrors } from '@/features/bookings/components/Checko
 import MockGatewayModal from '@/features/bookings/components/MockGatewayModal';
 import BookingBar from '@/features/bookings/components/BookingBar';
 import { formatINR } from '@/features/shared/utils/format';
-import { isMockMode } from '@/lib/config';
-import { supabase as supabaseClient } from '@/lib/supabaseClient';
+import { authHeaders } from '@/lib/authHeaders';
+import { toMobileDigits, validateContact } from '@/lib/contactRules';
 import styles from './CheckoutClient.module.css';
 
 function generateUUID() {
@@ -23,25 +22,69 @@ function generateUUID() {
   });
 }
 
-// Indian mobile: 10 digits starting 6–9. Profiles may store +91 / 0 prefixes.
-const toMobileDigits = (value: string) => {
-  const digits = (value || '').replace(/\D/g, '');
-  return digits.length > 10 ? digits.slice(-10) : digits;
-};
-
-function validate(name: string, phone: string, email: string): FieldErrors {
-  const errors: FieldErrors = {};
-  if (!name.trim()) errors.name = 'Enter the name for this booking.';
-  const digits = toMobileDigits(phone);
-  if (!digits) errors.phone = 'Enter your mobile number.';
-  else if (!/^[6-9]\d{9}$/.test(digits)) errors.phone = 'Enter a 10-digit mobile number.';
-  if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) errors.email = 'Check the email address, or leave it blank.';
-  return errors;
-}
-
 const formatTimer = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 
+const NO_CONNECTION = 'We couldn’t reach the server. Check your connection and try again.';
+// fetch() rejects with a TypeError only when the request never got an answer
+const friendlyError = (err: any, fallback: string) =>
+  err instanceof TypeError ? NO_CONNECTION : err?.message || fallback;
+
 type PaymentIssue = { kind: 'failed' | 'closed' | 'error'; message: string };
+type EarlierPayment = { bookingId: string; accessKey?: string };
+
+// After the payment window closes, or the customer comes back: money may already
+// be on its way, so keep asking for a while and go to the ticket as soon as it lands.
+const WATCH_FIRST_CHECK_MS = 1_000;
+const WATCH_EVERY_MS = 4_000;
+const WATCH_FOR_MS = 90_000;
+
+const RAZORPAY_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
+const RAZORPAY_LOAD_TIMEOUT_MS = 15_000;
+let razorpayLoading: Promise<boolean> | null = null;
+
+/** Loads Razorpay's script, and on a dropped connection tries again the next time Pay is pressed. */
+function loadRazorpay(): Promise<boolean> {
+  if ((window as any).Razorpay) return Promise.resolve(true);
+  razorpayLoading ??= new Promise<boolean>((resolve) => {
+    const script = document.createElement('script');
+    const finish = (loaded: boolean) => {
+      clearTimeout(timer);
+      if (!loaded) {
+        razorpayLoading = null;
+        script.remove();
+      }
+      resolve(loaded);
+    };
+    const timer = setTimeout(() => finish(!!(window as any).Razorpay), RAZORPAY_LOAD_TIMEOUT_MS);
+    script.src = RAZORPAY_SRC;
+    script.async = true;
+    script.onload = () => finish(true);
+    script.onerror = () => finish(false);
+    document.head.appendChild(script);
+  });
+  return razorpayLoading;
+}
+
+/**
+ * Counts down from the seconds the server reported. Only differences between two
+ * readings of this device's clock are used, so a phone whose clock is wrong still
+ * shows the right time left.
+ */
+function useHoldCountdown(initialSeconds: number) {
+  const [deadline, setDeadline] = useState(() => Date.now() + initialSeconds * 1000);
+  const [secondsLeft, setSecondsLeft] = useState(initialSeconds);
+  const restart = useCallback((seconds: number) => {
+    setDeadline(Date.now() + seconds * 1000);
+    setSecondsLeft(seconds);
+  }, []);
+  useEffect(() => {
+    const tick = () => setSecondsLeft(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [deadline]);
+  return { secondsLeft, restart };
+}
 
 export default function CheckoutClient({
   showId,
@@ -50,7 +93,9 @@ export default function CheckoutClient({
   lineItems,
   totalAmount,
   user,
-  holdExpiresAt
+  holdSecondsLeft,
+  earlierDetails,
+  resume
 }: {
   showId: string;
   seatLayoutIds: string[];
@@ -59,32 +104,55 @@ export default function CheckoutClient({
   lineItems: { label: string; count: number; price: number }[];
   totalAmount: number;
   user: any;
-  holdExpiresAt: string | null;
+  holdSecondsLeft: number;
+  earlierDetails: { name: string; phone: string; email: string } | null;
+  resume: EarlierPayment | null;
 }) {
   const router = useRouter();
   const { showToast } = useToast();
 
   const [paying, setPaying] = useState(false);
+  const [releasing, setReleasing] = useState(false);
   const [paymentIssue, setPaymentIssue] = useState<PaymentIssue | null>(null);
   const paymentFailedRef = useRef(false);
 
   // One key per checkout: a double click or retry returns the same booking/order
   const [idempotencyKey] = useState(generateUUID);
 
-  // Seat hold countdown (server time; extended when the payment window opens)
-  const [holdExpiry, setHoldExpiry] = useState<string | null>(holdExpiresAt);
-  const [secondsLeft, setSecondsLeft] = useState<number>(() =>
-    holdExpiresAt ? Math.max(0, Math.floor((new Date(holdExpiresAt).getTime() - Date.now()) / 1000)) : 0
-  );
+  // Seat hold countdown (server's figure; extended when the payment window opens)
+  const { secondsLeft, restart: restartCountdown } = useHoldCountdown(holdSecondsLeft);
+  useEffect(() => { restartCountdown(holdSecondsLeft); }, [holdSecondsLeft, restartCountdown]);
+  const holdExpired = secondsLeft === 0;
+  const holdUrgent = !holdExpired && secondsLeft <= 120;
+
+  // A cached page can bring back an old figure, and another tab can extend the
+  // hold, so ask again on arrival and whenever the customer returns to this tab.
+  const seatCount = seatLayoutIds.length;
   useEffect(() => {
-    if (!holdExpiry) return;
-    const tick = () => setSecondsLeft(Math.max(0, Math.floor((new Date(holdExpiry).getTime() - Date.now()) / 1000)));
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [holdExpiry]);
-  const holdExpired = !!holdExpiry && secondsLeft === 0;
-  const holdUrgent = !holdExpired && secondsLeft > 0 && secondsLeft <= 120;
+    const seatSet = new Set(seatLayoutIds);
+    const resync = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const res = await fetch(`/api/seats/holds?showId=${showId}`, { headers: await authHeaders() });
+        if (!res.ok) return;
+        const data: { seatLayoutIds: string[]; holdSecondsLeft: number } = await res.json();
+        const stillHeld = data.seatLayoutIds.filter(id => seatSet.has(id)).length === seatCount;
+        restartCountdown(stillHeld ? data.holdSecondsLeft : 0);
+      } catch {
+        // Offline: keep counting down from what we know
+      }
+    };
+    resync();
+    document.addEventListener('visibilitychange', resync);
+    return () => document.removeEventListener('visibilitychange', resync);
+    // seatLayoutIds is a new array on each render but the same seats: seatCount and showId identify it
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showId, seatCount, restartCountdown]);
+
+  // The hold has ended. The server decides what that means: ticket, refund, or pick seats again.
+  useEffect(() => {
+    if (holdExpired && !paying) router.refresh();
+  }, [holdExpired, paying, router]);
 
   // Screen readers hear the timer at a few moments, not every second
   const [timerAnnouncement, setTimerAnnouncement] = useState('');
@@ -94,13 +162,52 @@ export default function CheckoutClient({
     else if (holdExpired) setTimerAnnouncement('Your seat hold has expired.');
   }, [secondsLeft, holdExpired]);
 
-  const ticketPath = (bookingId: string, accessKey?: string, extra = '') =>
-    `/booking/confirmation/${bookingId}?${accessKey ? `k=${encodeURIComponent(accessKey)}` : ''}${extra}`;
+  const ticketPath = useCallback((bookingId: string, accessKey?: string, extra = '') =>
+    `/booking/confirmation/${bookingId}?${accessKey ? `k=${encodeURIComponent(accessKey)}` : ''}${extra}`, []);
 
-  // Form Fields
-  const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
+  // Asks Razorpay about an earlier attempt, and moves to the ticket if it landed
+  const [watching, setWatching] = useState<EarlierPayment | null>(resume);
+  const [watchFinished, setWatchFinished] = useState(false);
+  useEffect(() => {
+    if (!watching || paying) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const startedAt = Date.now();
+    const check = async () => {
+      try {
+        const res = await fetch('/api/bookings/verify-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bookingId: watching.bookingId }),
+        });
+        const data = res.ok ? await res.json() : null;
+        if (stopped) return;
+        if (data?.status === 'confirmed' || data?.status === 'refunded') {
+          router.replace(ticketPath(watching.bookingId, watching.accessKey));
+          return;
+        }
+      } catch {
+        // Offline: the next try, or the reconcile job, picks it up
+      }
+      if (stopped) return;
+      if (Date.now() - startedAt < WATCH_FOR_MS) timer = setTimeout(check, WATCH_EVERY_MS);
+      else setWatchFinished(true);
+    };
+    timer = setTimeout(check, WATCH_FIRST_CHECK_MS);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [watching, paying, router, ticketPath]);
+
+  useEffect(() => { loadRazorpay(); }, []);
+
+  // Form Fields. Staff sell to someone else, so their own details aren't filled in.
+  const isStaff = !!user && ['admin', 'member'].includes(user.role);
+  const fromAccount = user && !isStaff ? user : null;
+  const [customerName, setCustomerName] = useState<string>(earlierDetails?.name ?? fromAccount?.full_name ?? '');
+  const [customerPhone, setCustomerPhone] = useState<string>(earlierDetails?.phone ?? toMobileDigits(fromAccount?.phone));
+  const [customerEmail, setCustomerEmail] = useState<string>(earlierDetails?.email ?? fromAccount?.email ?? '');
   const [paymentMethod, setPaymentMethod] = useState<'online' | 'cash'>('online');
   const [errors, setErrors] = useState<FieldErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
@@ -109,23 +216,15 @@ export default function CheckoutClient({
   const [showMockGateway, setShowMockGateway] = useState(false);
   const [mockBookingPayload, setMockBookingPayload] = useState<any>(null);
 
-  useEffect(() => {
-    if (user) {
-      setCustomerName(user.full_name || '');
-      setCustomerPhone(toMobileDigits(user.phone || ''));
-      setCustomerEmail(user.email || '');
-    }
-  }, [user]);
-
   // Re-check a field once the person has left it, so errors don't appear mid-typing
   useEffect(() => {
-    const all = validate(customerName, customerPhone, customerEmail);
+    const all = validateContact(customerName, customerPhone, customerEmail);
     setErrors(Object.fromEntries(Object.entries(all).filter(([k]) => touched[k])) as FieldErrors);
   }, [customerName, customerPhone, customerEmail, touched]);
 
   const handleCheckoutSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const found = validate(customerName, customerPhone, customerEmail);
+    const found = validateContact(customerName, customerPhone, customerEmail);
     if (Object.keys(found).length > 0) {
       setTouched({ name: true, phone: true, email: true });
       setErrors(found);
@@ -142,19 +241,9 @@ export default function CheckoutClient({
     setPaymentIssue(null);
     paymentFailedRef.current = false;
     try {
-
-      let token = '';
-      if (!isMockMode) {
-        const { data } = await supabaseClient.auth.getSession();
-        token = data.session?.access_token || '';
-      }
-
       const res = await fetch('/api/checkout/create-order', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         body: JSON.stringify({
           showId,
           seatLayoutIds,
@@ -168,11 +257,16 @@ export default function CheckoutClient({
 
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to create booking order.');
+        if (errData.reason === 'hold_expired') {
+          restartCountdown(0);
+          setPaying(false);
+          return;
+        }
+        throw new Error(errData.error || 'Could not start the payment. Please try again.');
       }
 
       const orderData = await res.json();
-      if (orderData.holdExpiresAt) setHoldExpiry(orderData.holdExpiresAt);
+      if (typeof orderData.holdSecondsLeft === 'number') restartCountdown(orderData.holdSecondsLeft);
 
       if (orderData.alreadyPaid) {
         router.replace(ticketPath(orderData.bookingId, orderData.accessKey));
@@ -189,19 +283,19 @@ export default function CheckoutClient({
         setMockBookingPayload(orderData);
         setShowMockGateway(true);
       } else {
-        triggerRazorpayPayment(orderData);
+        await triggerRazorpayPayment(orderData);
       }
 
     } catch (err: any) {
       console.error(err);
-      setPaymentIssue({ kind: 'error', message: err.message || 'Checkout failed. Please try again.' });
+      setPaymentIssue({ kind: 'error', message: friendlyError(err, 'Checkout failed. Please try again.') });
       setPaying(false);
     }
   };
 
-  const triggerRazorpayPayment = (order: any) => {
-    if (!(window as any).Razorpay) {
-      setPaymentIssue({ kind: 'error', message: 'The payment page didn’t load. Check your connection and refresh this page.' });
+  const triggerRazorpayPayment = async (order: any) => {
+    if (!(await loadRazorpay())) {
+      setPaymentIssue({ kind: 'error', message: 'The payment page didn’t load. Check your connection and press Pay again.' });
       setPaying(false);
       return;
     }
@@ -229,9 +323,12 @@ export default function CheckoutClient({
           if (!paymentFailedRef.current) {
             setPaymentIssue({
               kind: 'closed',
-              message: 'The payment window closed before payment finished. If money left your account, we’ll confirm your ticket or refund you automatically within a few minutes.',
+              message: 'The payment window closed before payment finished. If money left your account, don’t pay again: we’ll confirm your ticket or refund you automatically within a few minutes.',
             });
           }
+          // Money may be on its way (UPI approvals arrive late, windows get closed by accident)
+          setWatchFinished(false);
+          setWatching({ bookingId: order.bookingId, accessKey: order.accessKey });
           setPaying(false);
         }
       },
@@ -303,10 +400,29 @@ export default function CheckoutClient({
     router.replace(`/booking/${showId}`);
   };
 
+  // The customer changed their mind: the seats go back on sale right away, and a
+  // payment that still lands on this booking is refunded.
+  const handleRelease = async () => {
+    setReleasing(true);
+    try {
+      const res = await fetch('/api/seats/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
+        body: JSON.stringify({ showId, seatLayoutIds })
+      });
+      if (!res.ok) throw new Error('Could not release your seats right now. They’ll be released when the timer ends.');
+      showToast('Your seats have been released.', 'success');
+      router.replace(`/booking/${showId}`);
+    } catch (err: any) {
+      showToast(friendlyError(err, 'Could not release your seats right now.'), 'error');
+      setReleasing(false);
+    }
+  };
+
   const isCash = paymentMethod === 'cash';
   const ticketWord = seatLayoutIds.length === 1 ? 'ticket' : 'tickets';
 
-  const timerNotice = holdExpiry && (
+  const timerNotice = (
     <div className={`${styles.timer} ${holdUrgent ? styles.timerUrgent : ''} ${holdExpired ? styles.timerExpired : ''}`}>
       <div className="container">
         {holdExpired ? (
@@ -320,7 +436,6 @@ export default function CheckoutClient({
 
   return (
     <>
-      <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
       <p className="sr-only" aria-live="assertive">{timerAnnouncement}</p>
 
       <div className={styles.grid}>
@@ -329,6 +444,19 @@ export default function CheckoutClient({
         </aside>
 
         <div className={styles.form}>
+          {resume && !paymentIssue && (
+            <div className="notice notice-accent" role="status" style={{ marginBottom: 16 }}>
+              <Clock aria-hidden />
+              <div>
+                {watchFinished ? (
+                  <><strong>We haven’t seen a payment for these seats yet. </strong>If you didn’t finish paying, you can pay below. If money did leave your account, we’ll confirm your ticket or refund you automatically.</>
+                ) : (
+                  <><strong>You started paying for these seats earlier. </strong>We’re checking whether it went through, and this page moves to your ticket as soon as it does. If money left your account, don’t pay again.</>
+                )}
+              </div>
+            </div>
+          )}
+
           {paymentIssue && (
             <div className={`notice ${paymentIssue.kind === 'closed' ? 'notice-urgent' : 'notice-danger'}`} role="alert" style={{ marginBottom: 16 }}>
               <AlertCircle aria-hidden />
@@ -337,7 +465,7 @@ export default function CheckoutClient({
                   {paymentIssue.kind === 'failed' ? 'Payment didn’t go through. ' : paymentIssue.kind === 'closed' ? 'Payment not finished. ' : ''}
                 </strong>
                 {paymentIssue.message}
-                {!holdExpired && holdExpiry && paymentIssue.kind !== 'error' && <> Your seats are still held for {formatTimer(secondsLeft)}.</>}
+                {!holdExpired && paymentIssue.kind !== 'error' && <> Your seats are still held for {formatTimer(secondsLeft)}.</>}
               </div>
             </div>
           )}
@@ -357,6 +485,16 @@ export default function CheckoutClient({
             paying={paying || holdExpired}
             handleCheckoutSubmit={handleCheckoutSubmit}
           />
+
+          <button
+            type="button"
+            className={`btn btn-quiet ${styles.release}`}
+            onClick={handleRelease}
+            disabled={paying || releasing || holdExpired}
+            aria-busy={releasing || undefined}
+          >
+            {releasing ? 'Releasing your seats…' : 'Cancel and release my seats'}
+          </button>
         </div>
       </div>
 

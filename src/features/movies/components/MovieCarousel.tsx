@@ -47,7 +47,7 @@ export default function MovieCarousel({ movies }: { movies: any[] }) {
           <button type="button" className={`${styles.arrow} ${styles.prev}`} onClick={() => scroll(-1)} disabled={edges.start} aria-label="Scroll movies left">
             <ChevronLeft aria-hidden />
           </button>
-          <ul className={styles.track} ref={scrollRef} onScroll={updateEdges}>
+          <ul className={styles.track} ref={scrollRef} onScroll={updateEdges} tabIndex={0} aria-label="Films now showing">
             {visible.map((movie, i) => (
               <li key={movie.id} className={styles.item}>
                 <MovieCard movie={movie} priority={i < 2} />

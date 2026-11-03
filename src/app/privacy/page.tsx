@@ -2,6 +2,11 @@ import React from 'react';
 import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
 
+export const metadata = {
+  title: 'Privacy policy',
+  description: 'How Dhrub Cineplex handles the details you give us when you book.',
+};
+
 export default function PrivacyPolicyPage() {
   return (
     <>

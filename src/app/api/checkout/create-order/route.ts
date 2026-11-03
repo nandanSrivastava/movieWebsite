@@ -3,16 +3,18 @@ import { z } from 'zod';
 import { db, isMockMode } from '@/lib/db';
 import { rateLimit } from '@/lib/rateLimit';
 import { getClientIp, getHoldOwner } from '@/lib/requestAuth';
-import { getRazorpay, isRazorpayConfigured, newQrToken, toPaise } from '@/lib/payments';
+import { checkEarlierAttempt, getRazorpay, isRazorpayConfigured, newQrToken, toPaise } from '@/lib/payments';
 import { queueTicketEmail } from '@/lib/mailer';
+import { EMAIL_MAX_LENGTH, NAME_MAX_LENGTH, toMobileDigits, validateContact } from '@/lib/contactRules';
+import type { Booking } from '@/lib/types';
 
 const createOrderSchema = z.object({
   showId: z.string().min(1).max(100),
   seatLayoutIds: z.array(z.string().min(1).max(100)).min(1).max(10)
     .refine(ids => new Set(ids).size === ids.length, 'Duplicate seats'),
-  customerName: z.string().trim().min(1).max(100),
-  customerPhone: z.string().trim().min(6).max(20).regex(/^[+\d\s()-]+$/, 'Invalid phone number'),
-  customerEmail: z.string().trim().email('Invalid email address').max(255).optional().or(z.literal('')),
+  customerName: z.string().trim().max(NAME_MAX_LENGTH * 2),
+  customerPhone: z.string().trim().max(20).regex(/^[+\d\s()-]+$/, 'Invalid phone number'),
+  customerEmail: z.string().trim().max(EMAIL_MAX_LENGTH * 2).optional(),
   idempotencyKey: z.string().uuid(),
   paymentMethod: z.enum(['online', 'cash']).optional().default('online'),
 });
@@ -20,6 +22,14 @@ const createOrderSchema = z.object({
 // Razorpay checkout closes after this long; seat holds are extended to cover it
 const CHECKOUT_WINDOW_SECONDS = 10 * 60;
 const HOLD_SLACK_SECONDS = 2 * 60;
+const MIN_CHECKOUT_WINDOW_SECONDS = 60;
+
+const secondsUntil = (iso: string | null) =>
+  iso ? Math.max(0, Math.floor((new Date(iso).getTime() - Date.now()) / 1000)) : 0;
+
+// The customer already has a ticket or a refund for these seats: send them to it
+const existingTicket = (booking: Booking) =>
+  NextResponse.json({ alreadyPaid: true, bookingId: booking.id, accessKey: booking.access_key });
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,12 +41,20 @@ export async function POST(req: NextRequest) {
     if (!result.success) {
       return NextResponse.json({ error: 'Please check your name, phone number and email.' }, { status: 400 });
     }
-    const { showId, seatLayoutIds, customerName, customerPhone, customerEmail, idempotencyKey, paymentMethod } = result.data;
+    const { showId, seatLayoutIds, idempotencyKey, paymentMethod } = result.data;
+    const customerName = result.data.customerName;
+    const customerEmail = result.data.customerEmail ?? '';
+    const contactErrors = validateContact(customerName, result.data.customerPhone, customerEmail);
+    const contactError = contactErrors.name || contactErrors.phone || contactErrors.email;
+    if (contactError) {
+      return NextResponse.json({ error: contactError }, { status: 400 });
+    }
+    const customerPhone = toMobileDigits(result.data.customerPhone);
 
     // 1. Who is buying, and whose seat holds this booking uses
     const { owner, user } = await getHoldOwner(req, false);
     if (!owner) {
-      return NextResponse.json({ error: 'Your seat hold has expired. Please select your seats again.' }, { status: 409 });
+      return NextResponse.json({ error: 'Your seat hold has expired. Please select your seats again.', reason: 'hold_expired' }, { status: 409 });
     }
 
     if (paymentMethod === 'cash' && (!user || !['admin', 'member'].includes(user.role))) {
@@ -64,7 +82,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'This show has already started.' }, { status: 400 });
     }
     if (pending.status === 'hold_expired') {
-      return NextResponse.json({ error: 'Your seat hold has expired. Please select your seats again.' }, { status: 409 });
+      // Paid in another tab, or the money came back: that's why the hold is gone
+      const earlier = await db.findHolderBooking(showId, seatLayoutIds, [owner]);
+      if (earlier && (await checkEarlierAttempt(earlier)) === 'ticket') return existingTicket(earlier);
+      return NextResponse.json({ error: 'Your seat hold has expired. Please select your seats again.', reason: 'hold_expired' }, { status: 409 });
     }
     if (pending.status === 'invalid' || !pending.booking) {
       return NextResponse.json({ error: 'Those seats are not available for this show. Please start again.' }, { status: 400 });
@@ -73,9 +94,7 @@ export async function POST(req: NextRequest) {
     const booking = pending.booking;
     const holdExpiresAt = pending.holdExpiresAt;
 
-    if (booking.payment_status === 'paid') {
-      return NextResponse.json({ alreadyPaid: true, bookingId: booking.id, accessKey: booking.access_key });
-    }
+    if (booking.payment_status === 'paid') return existingTicket(booking);
 
     // 4. Cash sale at the counter: confirm right away
     if (paymentMethod === 'cash') {
@@ -97,8 +116,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (isMockMode || !isRazorpayConfigured()) {
-      const mockOrderId = booking.razorpay_order_id || `order_mock_${booking.id}`;
-      if (!booking.razorpay_order_id) await db.setBookingOrderId(booking.id, mockOrderId);
+      const mockOrderId = booking.razorpay_order_id || await db.setBookingOrderId(booking.id, `order_mock_${booking.id}`);
       return NextResponse.json({
         isMock: true,
         bookingId: booking.id,
@@ -107,12 +125,15 @@ export async function POST(req: NextRequest) {
         customerName: booking.customer_name,
         customerPhone: booking.customer_phone,
         razorpayOrderId: mockOrderId,
-        holdExpiresAt,
+        holdSecondsLeft: secondsUntil(holdExpiresAt),
       });
     }
 
-    // Reuse the order if this checkout already created one (double click, retry)
+    // Reuse the order if this checkout already created one (double click, retry).
+    // Ask Razorpay about it first, so a customer who already paid is sent to their
+    // ticket rather than offered the payment window again.
     let orderId = booking.razorpay_order_id;
+    if (orderId && (await checkEarlierAttempt(booking)) === 'ticket') return existingTicket(booking);
     if (!orderId) {
       const order = await getRazorpay().orders.create({
         amount: toPaise(booking.total_amount),
@@ -120,9 +141,10 @@ export async function POST(req: NextRequest) {
         receipt: booking.id,
         notes: { bookingId: booking.id },
       });
-      orderId = order.id;
-      await db.setBookingOrderId(booking.id, orderId);
+      orderId = await db.setBookingOrderId(booking.id, order.id);
     }
+
+    const holdSecondsLeft = secondsUntil(holdExpiresAt);
 
     return NextResponse.json({
       isMock: false,
@@ -134,8 +156,9 @@ export async function POST(req: NextRequest) {
       customerName: booking.customer_name,
       customerPhone: booking.customer_phone,
       customerEmail: booking.customer_email,
-      holdExpiresAt,
-      checkoutTimeoutSeconds: CHECKOUT_WINDOW_SECONDS,
+      holdSecondsLeft,
+      // The payment window closes before the seat hold runs out
+      checkoutTimeoutSeconds: Math.max(MIN_CHECKOUT_WINDOW_SECONDS, Math.min(CHECKOUT_WINDOW_SECONDS, holdSecondsLeft - HOLD_SLACK_SECONDS)),
     });
   } catch (err) {
     console.error('Create order API error:', err);

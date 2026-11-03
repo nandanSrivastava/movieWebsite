@@ -12,7 +12,7 @@ import styles from './Header.module.css';
 
 export default function Header() {
   const pathname = usePathname();
-  const { user, signOut } = useCineBookAuth();
+  const { user, loading, signOut } = useCineBookAuth();
   const isHome = pathname === '/';
   const [scrolled, setScrolled] = useState(!isHome);
   const { resolvedTheme, setTheme } = useTheme();
@@ -69,6 +69,9 @@ export default function Header() {
   const handleLogout = async () => {
     setMenuOpen(false);
     try { await signOut(); } catch (e) { console.error(e); }
+    // A full page load: nothing from the signed-in session is left in memory for
+    // the next person on a shared phone, and staff don't land on "Access Denied".
+    window.location.replace('/');
   };
 
   const current = (p: string) => (pathname === p || (p !== '/' && pathname.startsWith(p + '/')) ? 'page' : undefined);
@@ -82,13 +85,14 @@ export default function Header() {
     <>
       <header className={`${styles.header} ${scrolled ? '' : styles.overHero}`}>
         <div className={`container ${styles.inner}`}>
-          <Link href="/" className={styles.brand} aria-label="Dhrub Cineplex, home">
+          <Link href="/" className={styles.brand}>
             <span className={styles.brandMark}>
               <Image src="/logo.jpeg" alt="" width={36} height={36} priority />
             </span>
             <span className={styles.brandText}>
-              <span className={styles.brandName}>Dhrub Cineplex</span>
+              <span className={styles.brandName}>Dhrub Cineplex</span>{' '}
               <span className={styles.brandPlace}>Bagaha, Bihar</span>
+              <span className="sr-only">, home</span>
             </span>
           </Link>
 
@@ -107,8 +111,17 @@ export default function Header() {
           </nav>
 
           <div className={styles.actions}>
+            {/* Keeps its space while the session is checked, which can take a few seconds on a
+                slow phone: a signed-in customer shouldn't see "Sign in", and nothing should jump */}
             {!user && (
-              <Link href={signInHref} className={`btn btn-ghost btn-sm ${styles.signIn}`}>Sign in</Link>
+              <Link
+                href={signInHref}
+                prefetch={false}
+                className={`btn btn-ghost btn-sm ${styles.signIn}`}
+                style={loading ? { visibility: 'hidden' } : undefined}
+              >
+                Sign in
+              </Link>
             )}
 
             <div className={styles.menuWrap} ref={menuRef}>
@@ -119,7 +132,7 @@ export default function Header() {
                 onClick={() => setMenuOpen(open => !open)}
                 aria-expanded={menuOpen}
                 aria-controls={panelId}
-                aria-label={user ? `Account menu for ${user.full_name || user.email}` : 'Menu'}
+                aria-label={user ? `${initials}, account menu for ${user.full_name || user.email}` : 'Menu'}
               >
                 {menuOpen ? <X aria-hidden /> : user ? <span className={styles.initials}>{initials}</span> : <Menu aria-hidden />}
               </button>
@@ -161,7 +174,7 @@ export default function Header() {
                   {user ? (
                     <button type="button" className={styles.item} onClick={handleLogout}><LogOut aria-hidden />Sign out</button>
                   ) : (
-                    <Link href={signInHref} className={styles.item}><LogIn aria-hidden />Sign in</Link>
+                    <Link href={signInHref} prefetch={false} className={styles.item}><LogIn aria-hidden />Sign in</Link>
                   )}
                 </div>
               )}

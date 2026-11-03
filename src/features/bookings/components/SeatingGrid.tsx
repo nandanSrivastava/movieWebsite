@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { ZoomIn, Maximize2 } from 'lucide-react';
 import { SeatStatusType, ShowType } from '@/lib/db';
 import { categoryPrice, formatINR } from '@/features/shared/utils/format';
@@ -38,8 +38,15 @@ const CENTRE_W = block(8);
 const RIGHT_W = block(5);
 export const HALL_WIDTH = LABEL * 2 + 16 + LEFT_W + CENTRE_W + RIGHT_W + AISLE * 2;
 
-// Below this scale seats are too small to tap, so a tap zooms in first
+// Below this scale seats are too small to tap, so a tap zooms in first.
+// SeatingGrid.module.css hides the zoom toolbar at this width as well.
 const TAP_ZOOM_THRESHOLD = 0.75;
+
+// Runs as the page is parsed, before the first paint: the server doesn't know
+// the screen width, and the hall shrinking after it appeared pushed the whole page.
+// While a page streams in, this part sits in a hidden block with no width of its
+// own, so it goes by the page container that is on screen (the loading skeleton's).
+const FIT_HALL_ON_LOAD = `(function(){var s=document.currentScript,v=s.parentElement,h=s.previousElementSibling,w=v.clientWidth;if(!w){var c=[].find.call(document.querySelectorAll('.container'),function(e){return e.clientWidth>0});if(!c)return;var p=getComputedStyle(c);w=c.clientWidth-parseFloat(p.paddingLeft)-parseFloat(p.paddingRight)}var z=Math.min(1,w/${HALL_WIDTH});h.style.zoom=z;if(z<${TAP_ZOOM_THRESHOLD})h.classList.add(${JSON.stringify(styles.overview)})})()`;
 
 const num = (s: SeatStatusType) => s.seat_layout?.seat_number ?? 0;
 
@@ -138,7 +145,7 @@ export default function SeatingGrid({ sortedRows, rowsMap, show, selectedSeats, 
     setEdges({ left: el.scrollLeft > 4, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 4 });
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     const measure = () => {
@@ -150,6 +157,14 @@ export default function SeatingGrid({ sortedRows, rowsMap, show, selectedSeats, 
     ro.observe(el);
     return () => ro.disconnect();
   }, [updateEdges]);
+
+  // React doesn't know what the script above set, so it wouldn't correct it by itself
+  useLayoutEffect(() => {
+    const hall = hallRef.current;
+    if (!hall) return;
+    hall.style.zoom = String(zoom);
+    hall.classList.toggle(styles.overview, zoom < TAP_ZOOM_THRESHOLD);
+  }, [zoom]);
 
   // After zooming in, keep the tapped spot under the finger
   useLayoutEffect(() => {
@@ -232,16 +247,14 @@ export default function SeatingGrid({ sortedRows, rowsMap, show, selectedSeats, 
 
   return (
     <div className={styles.wrap}>
-      {canTapZoom && (
-        <div className={styles.toolbar}>
-          <p className={styles.hint} aria-live="polite">
-            {zoomed ? 'Swipe sideways to see the whole row' : 'Tap the part of the hall you want to sit in'}
-          </p>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setZoomed(z => !z)} aria-pressed={zoomed}>
-            {zoomed ? <><Maximize2 aria-hidden />Whole hall</> : <><ZoomIn aria-hidden />Zoom in</>}
-          </button>
-        </div>
-      )}
+      <div className={styles.toolbar}>
+        <p className={styles.hint} aria-live="polite">
+          {zoomed ? 'Swipe sideways to see the whole row' : 'Tap the part of the hall you want to sit in'}
+        </p>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setZoomed(z => !z)} aria-pressed={zoomed}>
+          {zoomed ? <><Maximize2 aria-hidden />Whole hall</> : <><ZoomIn aria-hidden />Zoom in</>}
+        </button>
+      </div>
 
       <div
         className={styles.viewport}
@@ -258,6 +271,7 @@ export default function SeatingGrid({ sortedRows, rowsMap, show, selectedSeats, 
           aria-label="Seat map. Use arrow keys to move between seats."
           onClickCapture={onClickCapture}
           onKeyDown={onKeyDown}
+          suppressHydrationWarning
         >
           <CinemaScreen />
 
@@ -285,6 +299,7 @@ export default function SeatingGrid({ sortedRows, rowsMap, show, selectedSeats, 
             </React.Fragment>
           ))}
         </div>
+        <script dangerouslySetInnerHTML={{ __html: FIT_HALL_ON_LOAD }} />
       </div>
     </div>
   );

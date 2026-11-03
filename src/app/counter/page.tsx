@@ -9,7 +9,10 @@ import { useToast } from '@/features/shared/context/ToastContext';
 import { useCineBookAuth } from '@/features/auth/context/AuthContext';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Html5Qrcode } from 'html5-qrcode';
-import { istDateString, checkInWindow } from '@/lib/istDate';
+import { istDateString, checkInWindow, gateTiming } from '@/lib/istDate';
+import { ticketFromScan } from '@/lib/ticketInput';
+import { useServerOffset } from '@/features/shared/hooks/useServerClock';
+import { formatShowDate, formatShowTime } from '@/features/shared/utils/format';
 import {
   Ticket,
   QrCode,
@@ -28,9 +31,12 @@ import {
 
 export default function CounterPOSPage() {
   const router = useRouter();
-  const { user, loading: authLoading } = useCineBookAuth();
+  const { user, loading: authLoading, sessionCheckFailed, retrySessionCheck } = useCineBookAuth();
   const { showToast } = useToast();
   const queryClient = useQueryClient();
+  // Judged by the server's clock: a phone with a wrong one would refuse good tickets
+  const serverOffset = useServerOffset();
+  const serverNow = () => Date.now() + (serverOffset ?? 0);
 
   const [activeTab, setActiveTab] = useState<'sales' | 'verification'>('sales');
   const [searchQuery, setSearchQuery] = useState('');
@@ -41,8 +47,12 @@ export default function CounterPOSPage() {
   const [verifying, setVerifying] = useState(false);
   const [verifiedTicket, setVerifiedTicket] = useState<any | null>(null);
   const [verificationError, setVerificationError] = useState<string | null>(null);
+  // We never got an answer about the ticket. That says nothing about the ticket itself.
+  const [checkFailedFor, setCheckFailedFor] = useState<string | null>(null);
   const [searchMatches, setSearchMatches] = useState<any[] | null>(null);
+  const [searchHasMore, setSearchHasMore] = useState(false);
   const [admitting, setAdmitting] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const [admittedId, setAdmittedId] = useState<string | null>(null);
 
   // Camera QR Scanner State
@@ -65,13 +75,13 @@ export default function CounterPOSPage() {
   const shows = showsData || [];
 
   // Fetch paid bookings for today's shows for fast gate entry lookup
-  const { data: recentBookingsData, isLoading: loadingRecentBookings, isFetching: fetchingRecentBookings, refetch: refetchRecentBookings } = useQuery({
+  const { data: recentBookingsData, isLoading: loadingRecentBookings, isFetching: fetchingRecentBookings, isError: recentBookingsFailed, refetch: refetchRecentBookings } = useQuery({
     queryKey: ['counterRecentBookings'],
     queryFn: async () => {
       const res = await fetch('/api/counter/bookings');
       if (!res.ok) throw new Error('Failed to load bookings');
       const data = await res.json();
-      return data.bookings || [];
+      return { bookings: (data.bookings || []) as any[], hasMore: !!data.hasMore };
     },
     enabled: !!user && ['admin', 'member'].includes(user.role) && activeTab === 'verification',
     // Gate list must reflect new sales and admissions, so never serve it from cache
@@ -79,14 +89,15 @@ export default function CounterPOSPage() {
     refetchInterval: 30 * 1000,
   });
 
-  const recentBookings = recentBookingsData || [];
+  const recentBookings = recentBookingsData?.bookings || [];
 
   // Redirect non-staff/non-admins
   useEffect(() => {
-    if (!authLoading && (!user || !['admin', 'member'].includes(user.role))) {
-      router.replace('/login?error=unauthorized');
-    }
-  }, [user, authLoading, router]);
+    // A failed check isn't a refusal: staff get a retry below, not the login page
+    if (authLoading || sessionCheckFailed) return;
+    if (!user) router.replace('/login?redirect=/counter');
+    else if (!['admin', 'member'].includes(user.role)) router.replace('/login?error=unauthorized');
+  }, [user, authLoading, sessionCheckFailed, router]);
 
   useEffect(() => {
     if (error) {
@@ -108,27 +119,6 @@ export default function CounterPOSPage() {
       }
     };
   }, []);
-
-  const extractTokenFromScannedText = (scannedText: string): string => {
-    try {
-      const text = scannedText.trim();
-      if (text.includes('token=')) {
-        const url = new URL(text);
-        return url.searchParams.get('token') || text;
-      }
-      if (text.includes('id=')) {
-        const url = new URL(text);
-        return url.searchParams.get('id') || text;
-      }
-      if (text.includes('booking/')) {
-        const parts = text.split('/');
-        return parts[parts.length - 1] || text;
-      }
-      return text;
-    } catch {
-      return scannedText.trim();
-    }
-  };
 
   const startCameraScanner = async () => {
     setCameraError(null);
@@ -163,7 +153,7 @@ export default function CounterPOSPage() {
         if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
           window.navigator.vibrate([100, 50, 100]);
         }
-        const token = extractTokenFromScannedText(decodedText);
+        const token = ticketFromScan(decodedText);
         setTokenInput(token);
         stopCameraScanner();
         verifyTokenDirectly(token);
@@ -258,11 +248,19 @@ export default function CounterPOSPage() {
     setVerifying(true);
     setVerifiedTicket(null);
     setVerificationError(null);
+    setCheckFailedFor(null);
     setSearchMatches(null);
+    setSearchHasMore(false);
     setAdmittedId(null);
 
     try {
       const res = await fetch(`/api/bookings/verify?token=${encodeURIComponent(tokenToVerify.trim())}`);
+      // Server trouble and rate limits say nothing about the ticket. Only a real
+      // answer (not found, not paid) may turn a customer away.
+      if (res.status >= 500 || res.status === 429 || res.status === 401 || res.status === 403) {
+        setCheckFailedFor(tokenToVerify);
+        return;
+      }
       const data = await res.json();
 
       if (!res.ok) {
@@ -270,29 +268,31 @@ export default function CounterPOSPage() {
         showToast(data.error || 'Ticket verification failed.', 'error');
       } else if (data.matches) {
         // Phone / name search: one hit opens the ticket, several need staff to pick
-        if (data.matches.length === 1) {
+        if (data.matches.length === 1 && !data.hasMore) {
           setVerifiedTicket(data.matches[0]);
         } else {
           setSearchMatches(data.matches);
+          setSearchHasMore(!!data.hasMore);
         }
       } else {
         setVerifiedTicket(data.booking);
       }
     } catch (err) {
       console.error(err);
-      setVerificationError('Network error checking ticket validity.');
+      setCheckFailedFor(tokenToVerify);
     } finally {
       setVerifying(false);
     }
   };
 
-  const admitTicket = async (bookingId: string) => {
+  // No count means everyone on the ticket not yet in
+  const admitTicket = async (bookingId: string, count?: number) => {
     setAdmitting(true);
     try {
       const res = await fetch('/api/bookings/check-in', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bookingId }),
+        body: JSON.stringify({ bookingId, ...(count ? { count } : {}) }),
       });
       const data = await res.json();
 
@@ -300,15 +300,44 @@ export default function CounterPOSPage() {
       if (!res.ok) {
         showToast(data.error || 'Could not admit this ticket.', 'error');
       } else {
-        setAdmittedId(bookingId);
-        showToast('Entry approved. Ticket marked as used.', 'success');
+        if (data.booking?.checked_in_at) {
+          setAdmittedId(bookingId);
+          showToast('Entry approved. Ticket marked as used.', 'success');
+        } else {
+          showToast(`${data.admitted} admitted. The rest can come in on this ticket later.`, 'success');
+        }
       }
       queryClient.invalidateQueries({ queryKey: ['counterRecentBookings'] });
     } catch (err) {
       console.error(err);
-      showToast('Network error admitting ticket.', 'error');
+      showToast('We couldn’t reach the server, so this entry wasn’t recorded. Please try again.', 'error');
     } finally {
       setAdmitting(false);
+    }
+  };
+
+  const undoEntry = async (bookingId: string) => {
+    setUndoing(true);
+    try {
+      const res = await fetch('/api/bookings/check-in', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Could not undo this entry.', 'error');
+        return;
+      }
+      if (data.booking) setVerifiedTicket(data.booking);
+      setAdmittedId(null);
+      showToast('Entry undone. The ticket can be used again.', 'success');
+      queryClient.invalidateQueries({ queryKey: ['counterRecentBookings'] });
+    } catch (err) {
+      console.error(err);
+      showToast('We couldn’t reach the server, so the entry wasn’t undone. Please try again.', 'error');
+    } finally {
+      setUndoing(false);
     }
   };
 
@@ -318,41 +347,23 @@ export default function CounterPOSPage() {
   const formatAdmittedAt = (iso: string) =>
     new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
 
-  // Helper date/time formatters
-  const formatTimeLabel = (timeStr: string) => {
-    try {
-      const [hours, minutes] = timeStr.split(':');
-      const h = parseInt(hours);
-      const ampm = h >= 12 ? 'PM' : 'AM';
-      const displayH = h % 12 || 12;
-      return `${displayH.toString().padStart(2, '0')}:${minutes} ${ampm}`;
-    } catch {
-      return timeStr;
-    }
-  };
-
-  const formatDateLabel = (dateStr: string) => {
-    try {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    } catch {
-      return dateStr;
-    }
-  };
+  // Helper date/time formatters: cinema time, whatever zone this device is set to
+  const formatTimeLabel = (timeStr: string) => formatShowTime(timeStr);
+  const formatDateLabel = (dateStr: string) => formatShowDate(dateStr);
 
   const isShowInPast = (showDate: string, showTime: string) => {
     try {
       const formattedTime = showTime.length === 5 ? `${showTime}:00` : showTime;
       const showDateTime = new Date(`${showDate}T${formattedTime}+05:30`);
-      return showDateTime.getTime() < Date.now();
+      return showDateTime.getTime() < serverNow();
     } catch {
       return false;
     }
   };
 
   // Show dates are India dates; the browser's UTC date is wrong before 05:30 IST
-  const todayStr = istDateString();
-  const tomorrowStr = istDateString(new Date(Date.now() + 86400000));
+  const todayStr = istDateString(new Date(serverNow()));
+  const tomorrowStr = istDateString(new Date(serverNow() + 86400000));
 
   // Filter shows based on date, time, search
   const filteredShows = useMemo(() => {
@@ -372,7 +383,9 @@ export default function CounterPOSPage() {
 
       return true;
     });
-  }, [shows, selectedDateFilter, searchQuery, todayStr, tomorrowStr]);
+    // isShowInPast only depends on serverOffset, which is listed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shows, selectedDateFilter, searchQuery, todayStr, tomorrowStr, serverOffset]);
 
   // Group shows by movie
   const groupedByMovie = useMemo(() => {
@@ -401,14 +414,17 @@ export default function CounterPOSPage() {
     setTokenInput('');
     setVerifiedTicket(null);
     setVerificationError(null);
+    setCheckFailedFor(null);
     setSearchMatches(null);
+    setSearchHasMore(false);
     setAdmittedId(null);
   };
 
   // Gate state of the ticket on screen: admit only valid, unused tickets for today's shows
-  const todayIst = istDateString();
-  const entryWindow = verifiedTicket?.show ? checkInWindow(verifiedTicket.show.show_date, verifiedTicket.show.show_time) : 'closed';
-  const ticketState: 'admitted' | 'used' | 'wrong-day' | 'ready' | null = !verifiedTicket
+  const todayIst = todayStr;
+  const entryWindow = verifiedTicket?.show ? checkInWindow(verifiedTicket.show.show_date, verifiedTicket.show.show_time, serverNow()) : 'closed';
+  const timing = verifiedTicket?.show ? gateTiming(verifiedTicket.show.show_date, verifiedTicket.show.show_time, serverNow()) : 'on_time';
+  const ticketState: 'admitted' | 'used' | 'wrong-day' | 'check-show' | 'ready' | null = !verifiedTicket
     ? null
     : verifiedTicket.id === admittedId
       ? 'admitted'
@@ -416,8 +432,37 @@ export default function CounterPOSPage() {
         ? 'used'
         : entryWindow !== 'open'
           ? 'wrong-day'
-          : 'ready';
-  const ticketTone = ticketState === 'used' || ticketState === 'wrong-day' ? '#EF4444' : '#10B981';
+          : timing !== 'on_time'
+            ? 'check-show'
+            : 'ready';
+  const ticketTone = ticketState === 'used' || ticketState === 'wrong-day' ? '#EF4444' : ticketState === 'check-show' ? '#F59E0B' : '#10B981';
+  const ticketTint = ticketState === 'used' || ticketState === 'wrong-day' ? 'rgba(239,68,68,0.08)' : ticketState === 'check-show' ? 'rgba(245,158,11,0.08)' : 'rgba(16,185,129,0.08)';
+  // Staff count heads: part of a family may arrive first, and the rest later on the same ticket
+  const peopleOnTicket = verifiedTicket?.booking_seats?.length || 1;
+  const peopleIn = verifiedTicket?.admitted_seats || 0;
+  const peopleLeft = Math.max(1, peopleOnTicket - peopleIn);
+  const admitLabel = `Admit ${peopleLeft} ${peopleLeft === 1 ? 'person' : 'people'}`;
+
+  if (sessionCheckFailed && !user) {
+    return (
+      <>
+        <Header />
+        <div style={{ display: 'flex', minHeight: '70vh', alignItems: 'center', justifyContent: 'center', backgroundColor: '#090D16', color: '#FFFFFF', padding: '16px' }}>
+          <div role="alert" style={{ textAlign: 'center', maxWidth: '360px' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '8px' }}>We couldn&apos;t check your sign-in</h3>
+            <p style={{ fontSize: '0.85rem', color: '#9CA3AF', marginBottom: '14px' }}>This is a connection problem. Check your internet and try again.</p>
+            <button
+              onClick={retrySessionCheck}
+              style={{ padding: '10px 16px', borderRadius: '8px', backgroundColor: '#F59E0B', color: '#000000', fontWeight: 700, border: 'none', cursor: 'pointer' }}
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+        <Footer />
+      </>
+    );
+  }
 
   if (authLoading || !user || !['admin', 'member'].includes(user.role)) {
     return (
@@ -906,7 +951,7 @@ export default function CounterPOSPage() {
                 {searchMatches && (
                   <div className="rounded-xl border border-amber-400/40 bg-amber-400/5 p-3 animate-in fade-in duration-200" style={{ padding: '12px', borderRadius: '12px', border: '1px solid rgba(245,158,11,0.4)', backgroundColor: 'rgba(245,158,11,0.05)', marginBottom: '16px' }}>
                     <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#F59E0B', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>
-                      {searchMatches.length} tickets match. Pick the customer at the gate:
+                      {searchHasMore ? `More than ${searchMatches.length} tickets match. Showing the first ${searchMatches.length}; type more of the number or name to narrow it down:` : `${searchMatches.length} tickets match. Pick the customer at the gate:`}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {searchMatches.map((m: any) => (
@@ -935,23 +980,27 @@ export default function CounterPOSPage() {
 
                 {/* VERIFIED TICKET */}
                 {verifiedTicket && ticketState && (
-                  <div className="rounded-xl border-2 p-4 text-white animate-in fade-in duration-200" style={{ padding: '16px', borderRadius: '12px', backgroundColor: ticketTone === '#10B981' ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)', border: `2px solid ${ticketTone}`, color: '#FFFFFF' }}>
+                  <div className="rounded-xl border-2 p-4 text-white animate-in fade-in duration-200" style={{ padding: '16px', borderRadius: '12px', backgroundColor: ticketTint, border: `2px solid ${ticketTone}`, color: '#FFFFFF' }}>
                     <div className="mb-3 flex items-center justify-between" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
                       <div className="flex items-center gap-2" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {ticketTone === '#10B981'
                           ? <CheckCircle2 className="h-5 w-5" style={{ color: ticketTone }} />
-                          : <XCircle className="h-5 w-5" style={{ color: ticketTone }} />}
+                          : ticketState === 'check-show'
+                            ? <Clock className="h-5 w-5" style={{ color: ticketTone }} />
+                            : <XCircle className="h-5 w-5" style={{ color: ticketTone }} />}
                         <div>
                           <span className="text-[10px] font-extrabold uppercase tracking-wider" style={{ fontSize: '0.65rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: ticketTone }}>
                             {ticketState === 'admitted' && `ENTRY APPROVED · ${formatAdmittedAt(verifiedTicket.checked_in_at)}`}
                             {ticketState === 'used' && `ENTRY DENIED · USED AT ${formatAdmittedAt(verifiedTicket.checked_in_at)}`}
                             {ticketState === 'wrong-day' && 'ENTRY DENIED'}
+                            {ticketState === 'check-show' && 'PAID · CHECK THE SHOWTIME'}
                             {ticketState === 'ready' && 'PAID · NOT YET USED'}
                           </span>
                           <h3 className="text-sm font-extrabold text-white" style={{ fontSize: '1rem', fontWeight: 800, margin: 0 }}>
                             {ticketState === 'admitted' && 'ADMITTED'}
                             {ticketState === 'used' && 'TICKET ALREADY USED'}
                             {ticketState === 'wrong-day' && (entryWindow === 'too_early' ? 'TOO EARLY FOR THIS SHOW' : 'SHOW HAS ENDED')}
+                            {ticketState === 'check-show' && (timing === 'early' ? 'THIS TICKET IS FOR A LATER SHOW' : 'THIS TICKET IS FOR AN EARLIER SHOW')}
                             {ticketState === 'ready' && 'VALID TICKET'}
                           </h3>
                         </div>
@@ -986,15 +1035,54 @@ export default function CounterPOSPage() {
                       </div>
                     </div>
 
-                    {ticketState === 'ready' && (
+                    {peopleIn > 0 && !verifiedTicket.checked_in_at && (
+                      <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#FFFFFF', marginBottom: '10px' }}>
+                        {peopleIn} of {peopleOnTicket} already in. {peopleLeft} still to come.
+                      </p>
+                    )}
+
+                    {ticketState === 'check-show' && (
+                      <p style={{ fontSize: '0.8rem', color: '#FCD34D', marginBottom: '10px' }}>
+                        This ticket is for {formatTimeLabel(verifiedTicket.show?.show_time)}. Check they&apos;re going into the right show before you let them in.
+                      </p>
+                    )}
+
+                    {(ticketState === 'ready' || ticketState === 'check-show') && (
                       <button
                         onClick={() => admitTicket(verifiedTicket.id)}
                         disabled={admitting}
                         className="w-full rounded-lg py-2.5 text-sm font-extrabold text-slate-950 active:scale-[0.98] transition-all disabled:opacity-50"
-                        style={{ width: '100%', borderRadius: '8px', padding: '11px', fontSize: '0.9rem', fontWeight: 800, border: 'none', backgroundColor: '#10B981', color: '#000000', cursor: 'pointer', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                        style={{ width: '100%', borderRadius: '8px', padding: '11px', fontSize: '0.9rem', fontWeight: 800, border: 'none', backgroundColor: ticketTone, color: '#000000', cursor: 'pointer', marginBottom: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
                       >
                         {admitting ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-                        {admitting ? 'Admitting...' : 'Admit Entry'}
+                        {admitting ? 'Admitting...' : ticketState === 'check-show' ? `${admitLabel} anyway` : admitLabel}
+                      </button>
+                    )}
+
+                    {(ticketState === 'ready' || ticketState === 'check-show') && peopleLeft > 1 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px', marginBottom: '8px', fontSize: '0.78rem', color: '#D1D5DB' }}>
+                        <span>Not everyone here yet?</span>
+                        {Array.from({ length: peopleLeft - 1 }, (_, i) => i + 1).map((n) => (
+                          <button
+                            key={n}
+                            onClick={() => admitTicket(verifiedTicket.id, n)}
+                            disabled={admitting}
+                            aria-label={`Admit only ${n}`}
+                            style={{ minWidth: '44px', minHeight: '44px', borderRadius: '6px', fontWeight: 700, border: '1px solid rgba(255,255,255,0.2)', backgroundColor: 'transparent', color: '#FFFFFF', cursor: 'pointer' }}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {(ticketState === 'admitted' || ticketState === 'used' || peopleIn > 0) && (
+                      <button
+                        onClick={() => undoEntry(verifiedTicket.id)}
+                        disabled={undoing}
+                        style={{ width: '100%', borderRadius: '6px', padding: '8px', fontSize: '0.8rem', fontWeight: 700, border: '1px solid rgba(255,255,255,0.2)', backgroundColor: 'transparent', color: '#FFFFFF', cursor: 'pointer', marginBottom: '8px' }}
+                      >
+                        {undoing ? 'Undoing...' : 'Undo this entry'}
                       </button>
                     )}
 
@@ -1004,6 +1092,37 @@ export default function CounterPOSPage() {
                       style={{ width: '100%', borderRadius: '6px', padding: '8px', fontSize: '0.8rem', border: `1px solid ${ticketTone}66`, backgroundColor: '#111726', color: '#FFFFFF', cursor: 'pointer' }}
                     >
                       Clear & Scan Next Ticket
+                    </button>
+                  </div>
+                )}
+
+                {/* NO ANSWER: a connection or server problem, not a verdict on the ticket */}
+                {checkFailedFor && (
+                  <div role="alert" style={{ padding: '16px', borderRadius: '12px', backgroundColor: 'rgba(245,158,11,0.08)', border: '2px solid #F59E0B', color: '#FFFFFF' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                      <RefreshCw style={{ color: '#F59E0B', width: '20px', height: '20px' }} />
+                      <div>
+                        <span style={{ fontSize: '0.65rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#F59E0B' }}>
+                          NO ANSWER FROM THE SERVER
+                        </span>
+                        <h3 style={{ fontSize: '1rem', fontWeight: 800, margin: 0 }}>COULDN&apos;T CHECK THIS TICKET</h3>
+                      </div>
+                    </div>
+                    <p style={{ fontSize: '0.8rem', color: '#D1D5DB', marginBottom: '14px' }}>
+                      This is a connection problem, not a problem with the ticket. Please don&apos;t turn the customer away yet: check again.
+                    </p>
+                    <button
+                      onClick={() => verifyTokenDirectly(checkFailedFor)}
+                      disabled={verifying}
+                      style={{ width: '100%', borderRadius: '8px', padding: '11px', fontSize: '0.9rem', fontWeight: 800, border: 'none', backgroundColor: '#F59E0B', color: '#000000', cursor: 'pointer', marginBottom: '8px' }}
+                    >
+                      {verifying ? 'Checking...' : 'Check again'}
+                    </button>
+                    <button
+                      onClick={handleClearVerification}
+                      style={{ width: '100%', borderRadius: '6px', padding: '8px', fontSize: '0.8rem', border: '1px solid rgba(245,158,11,0.4)', backgroundColor: '#111726', color: '#FFFFFF', cursor: 'pointer' }}
+                    >
+                      Clear
                     </button>
                   </div>
                 )}
@@ -1061,6 +1180,11 @@ export default function CounterPOSPage() {
                       <RefreshCw className="mx-auto mb-1 h-4 w-4 animate-spin text-amber-400" style={{ width: '16px', height: '16px', margin: '0 auto 4px', color: '#F59E0B' }} />
                       Loading recent bookings list...
                     </div>
+                  ) : recentBookingsFailed && recentBookings.length === 0 ? (
+                    <div role="alert" style={{ padding: '12px', textAlign: 'center', fontSize: '0.78rem', color: '#FCD34D', backgroundColor: 'rgba(245,158,11,0.08)', borderRadius: '8px' }}>
+                      Couldn&apos;t load the list. This doesn&apos;t mean there are no tickets.{' '}
+                      <button onClick={() => refetchRecentBookings()} style={{ background: 'none', border: 'none', color: '#F59E0B', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer' }}>Try again</button>
+                    </div>
                   ) : recentBookings.length === 0 ? (
                     <div className="rounded-lg bg-slate-950/40 p-3 text-center text-xs text-slate-500" style={{ padding: '12px', textAlign: 'center', fontSize: '0.78rem', color: '#6B7280', backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
                       No paid tickets for today&apos;s shows yet.
@@ -1092,7 +1216,18 @@ export default function CounterPOSPage() {
                               </div>
                             </div>
 
-                            {b.checked_in_at ? (
+                            {b.admitted_seats > 0 && !b.checked_in_at ? (
+                              <button
+                                onClick={() => {
+                                  const targetToken = b.qr_code_token || b.id;
+                                  setTokenInput(targetToken);
+                                  verifyTokenDirectly(targetToken);
+                                }}
+                                style={{ padding: '6px 12px', fontSize: '0.75rem', fontWeight: 700, borderRadius: '6px', backgroundColor: '#F59E0B', color: '#000000', cursor: 'pointer', border: 'none', flexShrink: 0 }}
+                              >
+                                {b.admitted_seats} of {b.booking_seats?.length} in
+                              </button>
+                            ) : b.checked_in_at ? (
                               <span
                                 className="flex-shrink-0 text-[11px] font-bold"
                                 style={{ flexShrink: 0, fontSize: '0.72rem', fontWeight: 700, color: '#10B981', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
@@ -1116,6 +1251,11 @@ export default function CounterPOSPage() {
                           </div>
                         );
                       })}
+                      {recentBookingsData?.hasMore && (
+                        <p style={{ fontSize: '0.72rem', color: '#9CA3AF', textAlign: 'center', margin: '4px 0 0' }}>
+                          Showing the latest {recentBookings.length}. Search above to find any other ticket.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>

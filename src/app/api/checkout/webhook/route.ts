@@ -2,13 +2,38 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { db, isMockMode } from '@/lib/db';
 import { settlePayment, toPaise } from '@/lib/payments';
+import { queueRefundEmail } from '@/lib/mailer';
+import { revalidateShowPages } from '@/lib/revalidate';
+import type { Booking } from '@/lib/types';
 
-const HANDLED_EVENTS = new Set(['payment.captured', 'order.paid']);
+const PAYMENT_EVENTS = new Set(['payment.captured', 'order.paid']);
+const REFUND_EVENTS = new Set(['refund.processed']);
 
 function signatureMatches(rawBody: string, signature: string, secret: string) {
   const expected = Buffer.from(crypto.createHmac('sha256', secret).update(rawBody).digest('hex'));
   const received = Buffer.from(signature);
   return expected.length === received.length && crypto.timingSafeEqual(expected, received);
+}
+
+/**
+ * A refund made in the Razorpay dashboard. A full refund ends the ticket, so the
+ * gate stops admitting it and the seats go back on sale. A part refund is only
+ * noted: the customer keeps their ticket. Refunds the app made itself find the
+ * booking already moved on, and do nothing here.
+ */
+async function applyRefundEvent(booking: Booking, payment: { id: string; amount: number; amount_refunded?: number }, refundId: string | null) {
+  const full = Number(payment.amount_refunded ?? 0) >= Number(payment.amount);
+  if (!full) {
+    await db.logAudit(booking.booked_by, 'PAYMENT_PART_REFUND', { bookingId: booking.id, paymentId: payment.id, refunded: payment.amount_refunded });
+    return 'part_refund';
+  }
+  const outcome = await db.recordExternalRefund(booking.id, payment.id, refundId);
+  if (outcome === 'refunded') {
+    await db.logAudit(booking.booked_by, 'PAYMENT_REFUNDED_EXTERNALLY', { bookingId: booking.id, paymentId: payment.id, refundId });
+    queueRefundEmail(booking.id);
+    revalidateShowPages(booking.show?.movie_id, booking.show_id);
+  }
+  return outcome;
 }
 
 export async function POST(req: NextRequest) {
@@ -55,7 +80,7 @@ export async function POST(req: NextRequest) {
     }
 
     const event = JSON.parse(rawBody);
-    if (!HANDLED_EVENTS.has(event.event)) {
+    if (!PAYMENT_EVENTS.has(event.event) && !REFUND_EVENTS.has(event.event)) {
       return NextResponse.json({ received: true, ignored: event.event });
     }
 
@@ -68,9 +93,17 @@ export async function POST(req: NextRequest) {
     // payer's browser and are never trusted.
     const booking = await db.getBookingByOrderId(payment.order_id);
     if (!booking) {
+      // Money nothing here tracks: leave a trace the owner can see and act on
       console.warn(`Webhook for unknown order ${payment.order_id} (payment ${payment.id})`);
+      await db.logAudit(null, 'PAYMENT_UNKNOWN_ORDER', { orderId: payment.order_id, paymentId: payment.id, amount: payment.amount, event: event.event });
       await db.recordWebhookEvent(eventId);
       return NextResponse.json({ received: true, ignored: 'unknown order' });
+    }
+
+    if (REFUND_EVENTS.has(event.event)) {
+      const status = await applyRefundEvent(booking, payment, event.payload?.refund?.entity?.id ?? null);
+      await db.recordWebhookEvent(eventId);
+      return NextResponse.json({ received: true, status });
     }
 
     const status = await settlePayment(booking, payment, 'webhook');

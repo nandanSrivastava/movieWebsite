@@ -8,6 +8,12 @@ interface GoldTicketPassExportProps {
   formatDateLabel: (dateStr: string) => string;
 }
 
+/** The seat class printed on the pass: what was actually bought. */
+function seatClass(booking: any): string {
+  const categories = new Set((booking?.booking_seats ?? []).map((bs: any) => bs.seat_layout?.category === 'premium' ? 'PREMIUM' : 'CLASSIC'));
+  return Array.from(categories).sort().join(' + ') || 'CLASSIC';
+}
+
 /* 3D Gold Shooting Star Emblem (Matching Reference Image) */
 const ShootingStar3D = ({ size = 68 }: { size?: number }) => (
   <svg width={size} height={size * 0.9} viewBox="0 0 160 140" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -260,7 +266,7 @@ const GoldTicketPassExport = forwardRef<HTMLDivElement, GoldTicketPassExportProp
 
         </div>
 
-        {/* SEAT NO. | SILVER | PRICE CAPSULE BOX */}
+        {/* SEAT NO. | CLASS | PRICE CAPSULE BOX */}
         <div style={{
           border: '1.8px solid #E2C275',
           borderRadius: '14px',
@@ -290,7 +296,7 @@ const GoldTicketPassExport = forwardRef<HTMLDivElement, GoldTicketPassExportProp
           <div style={{ height: '22px', width: '1px', backgroundColor: 'rgba(226, 194, 117, 0.4)' }} />
 
           <span style={{ fontSize: '0.98rem', fontWeight: 900, color: '#FFFFFF', letterSpacing: '2px', textTransform: 'uppercase' }}>
-            SILVER
+            {seatClass(booking)}
           </span>
 
           <span style={{ fontSize: '1.1rem', fontWeight: 900, color: '#F5D77F' }}>

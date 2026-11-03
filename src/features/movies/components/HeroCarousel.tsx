@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
 import { posterImgProps } from '@/features/shared/utils/posterImage';
+import { useServerOffset } from '@/features/shared/hooks/useServerClock';
 import { formatDuration, formatShowTime, hasShowStarted } from '@/features/shared/utils/format';
 import styles from './HeroCarousel.module.css';
 
@@ -22,15 +23,20 @@ export default function HeroCarousel({ movies, todaysShows = {}, renderedAt }: {
   const [reducedMotion, setReducedMotion] = useState(false);
   const [now, setNow] = useState(renderedAt);
   const sectionRef = useRef<HTMLElement>(null);
+  const serverOffset = useServerOffset();
 
   useEffect(() => {
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     setReducedMotion(mq.matches);
     const onChange = () => setReducedMotion(mq.matches);
     mq.addEventListener('change', onChange);
-    setNow(Date.now());
     return () => mq.removeEventListener('change', onChange);
   }, []);
+
+  // The page may be cached and the phone's clock wrong, so show times are judged by the server's clock
+  useEffect(() => {
+    if (serverOffset !== null) setNow(Date.now() + serverOffset);
+  }, [serverOffset]);
 
   const rotating = movies.length > 1 && !paused && !hovering && !reducedMotion;
   useEffect(() => {

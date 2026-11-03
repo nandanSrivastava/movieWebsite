@@ -2,6 +2,11 @@ import React from 'react';
 import Header from '@/features/shared/components/Header';
 import Footer from '@/features/shared/components/Footer';
 
+export const metadata = {
+  title: 'Terms of use',
+  description: 'The terms for booking tickets and visiting Dhrub Cineplex, Bagaha.',
+};
+
 export default function TermsPage() {
   return (
     <>
